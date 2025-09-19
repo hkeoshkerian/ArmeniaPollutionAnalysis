@@ -15,3 +15,5 @@ The portal is deployed on **https://www.render.com** and can be accessed at:
 👉 [https://armeniapollutionanalysis.onrender.com/](https://armeniapollutionanalysis.onrender.com/)
 
 *(Currently suspended to avoid exhausting Google API free credits.)*
+
+![Alt text](YerevanTrafficDataPortal.png)
