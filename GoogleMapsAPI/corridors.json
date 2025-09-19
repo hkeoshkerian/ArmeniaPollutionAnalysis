@@ -1,0 +1,42 @@
+[
+  {
+    "label": "Mashtots_Ave_RepSq_to_HrazdanGorge",
+    "origin": {"lat": 40.1772, "lng": 44.5126},
+    "dest":   {"lat": 40.1708, "lng": 44.4940}
+  },
+  {
+    "label": "Komitas_Ave_Barekamutyun_to_Arabkir",
+    "origin": {"lat": 40.2066, "lng": 44.5094},
+    "dest":   {"lat": 40.2145, "lng": 44.5245}
+  },
+  {
+    "label": "TigranMets_RepSq_to_Shengavit",
+    "origin": {"lat": 40.1772, "lng": 44.5126},
+    "dest":   {"lat": 40.1629, "lng": 44.5135}
+  },
+  {
+    "label": "Halabyan_Alabyan_Barekamutyun_to_Achapnyak",
+    "origin": {"lat": 40.2071, "lng": 44.5083},
+    "dest":   {"lat": 40.2142, "lng": 44.4871}
+  },
+  {
+    "label": "Miasnikyan_Kentron_to_NorNork",
+    "origin": {"lat": 40.2045, "lng": 44.5400},
+    "dest":   {"lat": 40.2205, "lng": 44.5660}
+  },
+  {
+    "label": "Arshakunyats_Center_to_ShengavitIndustrial",
+    "origin": {"lat": 40.1675, "lng": 44.5087},
+    "dest":   {"lat": 40.1469, "lng": 44.4807}
+  },
+  {
+    "label": "Kievyan_Bridge_Crossing",
+    "origin": {"lat": 40.2043, "lng": 44.4982},
+    "dest":   {"lat": 40.2048, "lng": 44.5045}
+  },
+  {
+    "label": "Victory_Bridge_Crossing",
+    "origin": {"lat": 40.1763, "lng": 44.4962},
+    "dest":   {"lat": 40.1822, "lng": 44.4977}
+  }
+]
