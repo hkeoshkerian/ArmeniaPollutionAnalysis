@@ -1,0 +1,332 @@
+[
+  {
+    "label": "Khatchatur_Abovyan_Square_to_Charbakh",
+    "origin": {
+      "lat": 40.1916,
+      "lng": 44.5282
+    },
+    "dest": {
+      "lat": 40.1406,
+      "lng": 44.4708
+    }
+  },
+  {
+    "label": "Charbakh_to_Argavand",
+    "origin": {
+      "lat": 40.1406,
+      "lng": 44.4708
+    },
+    "dest": {
+      "lat": 40.1558,
+      "lng": 44.4385
+    }
+  },
+  {
+    "label": "Zvartnots_Airport_to_Republic_Square",
+    "origin": {
+      "lat": 40.1523,
+      "lng": 44.3968
+    },
+    "dest": {
+      "lat": 40.178,
+      "lng": 44.5129
+    }
+  },
+  {
+    "label": "Noy_factory_to_Aram_Khachaturian_Concert_Hall",
+    "origin": {
+      "lat": 40.1829,
+      "lng": 44.5164
+    },
+    "dest": {
+      "lat": 40.1863,
+      "lng": 44.5151
+    }
+  },
+  {
+    "label": "Barekamutyun_to_Aram_Khachaturian_Concert_Hall",
+    "origin": {
+      "lat": 40.1969,
+      "lng": 44.4951
+    },
+    "dest": {
+      "lat": 40.1863,
+      "lng": 44.5151
+    }
+  },
+  {
+    "label": "Khatchatur_Abovyan_Square_to_Shangri_La_Yerevan",
+    "origin": {
+      "lat": 40.1916,
+      "lng": 44.5282
+    },
+    "dest": {
+      "lat": 40.2526,
+      "lng": 44.5895
+    }
+  },
+  {
+    "label": "Khatchatur_Abovyan_Square_to_Winter_Park",
+    "origin": {
+      "lat": 40.1916,
+      "lng": 44.5282
+    },
+    "dest": {
+      "lat": 40.2119,
+      "lng": 44.5306
+    }
+  },
+  {
+    "label": "Barekamutyun_to_Almast_railway_station",
+    "origin": {
+      "lat": 40.1969,
+      "lng": 44.4951
+    },
+    "dest": {
+      "lat": 40.2051,
+      "lng": 44.5505
+    }
+  },
+  {
+    "label": "Datvashen_to_Embassy_of_the_USA",
+    "origin": {
+      "lat": 40.2168,
+      "lng": 44.487
+    },
+    "dest": {
+      "lat": 40.1647,
+      "lng": 44.4813
+    }
+  },
+  {
+    "label": "Datvashen_to_Yerevan_Park",
+    "origin": {
+      "lat": 40.2168,
+      "lng": 44.487
+    },
+    "dest": {
+      "lat": 40.1753,
+      "lng": 44.5072
+    }
+  },
+  {
+    "label": "Aram_Khachaturian_Concert_Hall_to_Red_Hotel_Yerevan",
+    "origin": {
+      "lat": 40.1863,
+      "lng": 44.5151
+    },
+    "dest": {
+      "lat": 40.1656,
+      "lng": 44.5164
+    }
+  },
+  {
+    "label": "Khatchatur_Abovyan_Square_to_Aram_Khachaturian_Concert_Hall",
+    "origin": {
+      "lat": 40.1916,
+      "lng": 44.5282
+    },
+    "dest": {
+      "lat": 40.1863,
+      "lng": 44.5151
+    }
+  },
+  {
+    "label": "Khatchatur_Abovyan_Square_to_Nork_Marash_Yerevan",
+    "origin": {
+      "lat": 40.1916,
+      "lng": 44.5282
+    },
+    "dest": {
+      "lat": 40.1813,
+      "lng": 44.5405
+    }
+  },
+  {
+    "label": "Matenadaran_to_Embassy_of_Germany_Yerevan",
+    "origin": {
+      "lat": 40.1921,
+      "lng": 44.5211
+    },
+    "dest": {
+      "lat": 40.1762,
+      "lng": 44.5163
+    }
+  },
+  {
+    "label": "Embassy_of_Germany_Yerevan_to_State_Museum_of_Nature_of_Armenia_Yerevan",
+    "origin": {
+      "lat": 40.1762,
+      "lng": 44.5163
+    },
+    "dest": {
+      "lat": 40.1656,
+      "lng": 44.5127
+    }
+  },
+  {
+    "label": "Sasuntsi_Davit_Statue_to_Eurobaza_Yerevan",
+    "origin": {
+      "lat": 40.1553,
+      "lng": 44.5094
+    },
+    "dest": {
+      "lat": 40.1208,
+      "lng": 44.5145
+    }
+  },
+  {
+    "label": "Shengavit_Yerevan_to_Ajapnyak_Yerevan",
+    "origin": {
+      "lat": 40.1512,
+      "lng": 44.4832
+    },
+    "dest": {
+      "lat": 40.2048,
+      "lng": 44.4614
+    }
+  },
+  {
+    "label": "Ajapnyak_Yerevan_to_Zovuni_Yerevan",
+    "origin": {
+      "lat": 40.2048,
+      "lng": 44.4614
+    },
+    "dest": {
+      "lat": 40.2256,
+      "lng": 44.5096
+    }
+  },
+  {
+    "label": "Ajapnyak_Yerevan_to_Proshyan_Yerevan",
+    "origin": {
+      "lat": 40.2048,
+      "lng": 44.4614
+    },
+    "dest": {
+      "lat": 40.2509,
+      "lng": 44.4218
+    }
+  },
+  {
+    "label": "Republic_Square_Yerevan_to_Sasuntsi_Davit_Statue_Yerevan",
+    "origin": {
+      "lat": 40.178,
+      "lng": 44.5129
+    },
+    "dest": {
+      "lat": 40.1553,
+      "lng": 44.5094
+    }
+  },
+  {
+    "label": "Ararat_Museum_Yerevan_to_Hotel_Aleppo_Yerevan",
+    "origin": {
+      "lat": 40.1738,
+      "lng": 44.5013
+    },
+    "dest": {
+      "lat": 40.1872,
+      "lng": 44.4614
+    }
+  },
+  {
+    "label": "Argavand_Yerevan_to_Bangladesh_Mall_Yerevan",
+    "origin": {
+      "lat": 40.1525,
+      "lng": 44.4473
+    },
+    "dest": {
+      "lat": 40.1601,
+      "lng": 44.44
+    }
+  },
+  {
+    "label": "Central_Cemetery_Tomakh_Yerevan_to_Jrvezh_Yerevan",
+    "origin": {
+      "lat": 40.2112,
+      "lng": 44.5732
+    },
+    "dest": {
+      "lat": 40.1883,
+      "lng": 44.5957
+    }
+  },
+  {
+    "label": "Jrvezh_Yerevan_to_Almast_railway_station",
+    "origin": {
+      "lat": 40.1883,
+      "lng": 44.5957
+    },
+    "dest": {
+      "lat": 40.2051,
+      "lng": 44.5505
+    }
+  },
+  {
+    "label": "Winter_Park_Yerevan_to_Shangri_La_Yerevan",
+    "origin": {
+      "lat": 40.2119,
+      "lng": 44.5306
+    },
+    "dest": {
+      "lat": 40.2526,
+      "lng": 44.5895
+    }
+  },
+  {
+    "label": "Jrvezh_Yerevan_to_Shangri_La_Yerevan",
+    "origin": {
+      "lat": 40.1883,
+      "lng": 44.5957
+    },
+    "dest": {
+      "lat": 40.2526,
+      "lng": 44.5895
+    }
+  },
+  {
+    "label": "Barekamutyun_to_Yerevan_Park",
+    "origin": {
+      "lat": 40.1969,
+      "lng": 44.4951
+    },
+    "dest": {
+      "lat": 40.1753,
+      "lng": 44.5072
+    }
+  },
+  {
+    "label": "Barekamutyun_to_Khatchatur_Abovyan_Square",
+    "origin": {
+      "lat": 40.1969,
+      "lng": 44.4951
+    },
+    "dest": {
+      "lat": 40.1916,
+      "lng": 44.5282
+    }
+  },
+  {
+    "label": "Yeritasardakan_to_Republic_Square",
+    "origin": {
+      "lat": 40.1862,
+      "lng": 44.5199
+    },
+    "dest": {
+      "lat": 40.178,
+      "lng": 44.5129
+    }
+  },
+  {
+    "label": "Republic_Square_to_Noy_Factory",
+    "origin": {
+      "lat": 40.178,
+      "lng": 44.5129
+    },
+    "dest": {
+      "lat": 40.1829,
+      "lng": 44.5164
+    }
+  }
+]
