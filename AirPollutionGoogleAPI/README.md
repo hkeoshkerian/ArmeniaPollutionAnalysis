@@ -12,7 +12,7 @@ The application is deployed on Render.com and available at:
 - **Real-time Monitoring**: Hourly polling of Google Air Quality API
 - **Web Dashboard**: Live updating web interface with current and historical data
 - **Data Export**: Download complete CSV dataset
-- **Multiple Pollutants**: PM2.5, PM10, NO₂, O₃, CO, SO₂ monitoring
+- **Multiple Pollutants**: NO₂, O₃, CO, SO₂ monitoring
 - **24-hour History**: View trends from the past day
 
 ## Pollutants Monitored
@@ -21,16 +21,5 @@ The application is deployed on Render.com and available at:
 - **CO** - Carbon monoxide (ppb)
 - **SO₂** - Sulfur dioxide (μg/m³)
 - **Overall AQI** - Universal Air Quality Index
-
-Usage
-Access the web portal: https://airpollutiongoogleapi.onrender.com/
-
-View current air quality in the main table
-
-See 24-hour trends in the historical data table
-
-Download data using the "Download Full CSV" link
-
-Check system status via the "System Health" API
 
 ![Alt text](YerevanAirQualityMonitor.png)
