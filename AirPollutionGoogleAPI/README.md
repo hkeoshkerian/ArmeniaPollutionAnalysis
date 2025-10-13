@@ -5,7 +5,7 @@ A real-time air quality monitoring web application for Yerevan, Armenia that pol
 ## 🚀 Live Deployment
 
 The application is deployed on Render.com and available at:
-**https://airpollutiongoogleapi.onrender.com/**
+**https://armeniapollutionanalysis-578058838716.europe-west1.run.app/**
 
 ## Features
 
