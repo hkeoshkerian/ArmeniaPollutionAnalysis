@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
-import os, csv, json, time, threading, signal, sys
-from datetime import datetime, timezone, timedelta
+import os, csv, json, time, sys
+from datetime import datetime, timezone
 from typing import List, Dict, Any
 import requests
 from flask import Flask, jsonify, send_file, Response
+from google.cloud import storage
 
 # ----------------------------
 # Config
 # ----------------------------
-POLL_INTERVAL_SEC = int(os.getenv("POLL_INTERVAL_SEC", "3600"))  # 1 hour default
-CSV_PATH = os.getenv("CSV_PATH", "/tmp/pollution_data.csv")  # Use /tmp for Cloud Run
+CSV_PATH = os.getenv("CSV_PATH", "/tmp/pollution_data.csv")
 HOST = os.getenv("HOST", "0.0.0.0")
-PORT = int(os.getenv("PORT", "8080"))  # Cloud Run uses 8080
+PORT = int(os.getenv("PORT", "8080"))
+
+# Cloud Storage Configuration
+BUCKET_NAME = "yerevan-air-quality-data"  # You'll create this bucket
+CSV_FILENAME = "air_quality_data.csv"
 
 # Google Air Quality API
 AIR_QUALITY_URL = "https://airquality.googleapis.com/v1/currentConditions:lookup"
@@ -81,25 +85,54 @@ CSV_HEADER = [
     "overall_aqi", "CO_ppb", "NO2_ugm3", "O3_ugm3", "SO2_ugm3", "PM25_ugm3", "PM10_ugm3"
 ]
 
+# Cloud Storage Functions
+def save_to_cloud_storage():
+    """Save CSV to Cloud Storage"""
+    try:
+        client = storage.Client()
+        bucket = client.bucket(BUCKET_NAME)
+        blob = bucket.blob(CSV_FILENAME)
+        
+        blob.upload_from_filename(CSV_PATH)
+        print(f"💾 CSV backed up to Cloud Storage: {BUCKET_NAME}/{CSV_FILENAME}")
+        return True
+    except Exception as e:
+        print(f"❌ Cloud Storage backup failed: {e}")
+        return False
+
+def load_from_cloud_storage():
+    """Load CSV from Cloud Storage"""
+    try:
+        client = storage.Client()
+        bucket = client.bucket(BUCKET_NAME)
+        blob = bucket.blob(CSV_FILENAME)
+        
+        if blob.exists():
+            blob.download_to_filename(CSV_PATH)
+            print(f"📥 Loaded existing CSV from Cloud Storage")
+            return True
+        else:
+            print(f"📝 No existing CSV found in Cloud Storage, will create new one")
+            return False
+    except Exception as e:
+        print(f"❌ Cloud Storage load failed: {e}")
+        return False
+
 def ensure_csv():
     """Create CSV file if it doesn't exist"""
-    current_dir = os.getcwd()
-    print(f"📁 Current working directory: {current_dir}")
-    print(f"💾 CSV will be saved to: {os.path.abspath(CSV_PATH)}")
-    
     if not os.path.exists(CSV_PATH):
         with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(CSV_HEADER)
         print(f"✅ Created new CSV file: {CSV_PATH}")
+        
+        # Save initial CSV to Cloud Storage
+        save_to_cloud_storage()
     else:
         file_size = os.path.getsize(CSV_PATH)
         print(f"📊 Using existing CSV file: {CSV_PATH} (size: {file_size} bytes)")
 
-ensure_csv()
-
-# In-memory caches
+# In-memory cache for latest readings only
 latest_cache: Dict[str, Dict[str, Any]] = {}
-recent_data_cache: List[Dict[str, Any]] = []
 
 # Health tracking
 last_poll_at = None
@@ -178,14 +211,8 @@ def create_csv_row(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
     
     return row
 
-def cleanup_old_data():
-    global recent_data_cache
-    cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
-    cutoff_iso = cutoff_time.isoformat()
-    recent_data_cache = [row for row in recent_data_cache if row['timestamp_utc'] >= cutoff_iso]
-
 def poll_once():
-    global last_poll_at, last_poll_error, rows_written_total, recent_data_cache
+    global last_poll_at, last_poll_error, rows_written_total
     
     print(f"🚀 Starting poll at {datetime.now(timezone.utc).isoformat()}")
     
@@ -217,16 +244,17 @@ def poll_once():
     last_poll_at = datetime.now(timezone.utc).isoformat()
     
     if all_rows:
-        # Append to CSV
+        # Append to local CSV
         with open(CSV_PATH, "a", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=CSV_HEADER)
             for row in all_rows:
                 writer.writerow(row)
                 rows_written_total += 1
         
-        recent_data_cache.extend(all_rows)
-        cleanup_old_data()
-        print(f"📈 Added {len(all_rows)} rows to CSV. Total: {rows_written_total}")
+        # Save to Cloud Storage
+        cloud_success = save_to_cloud_storage()
+        
+        print(f"📈 Added {len(all_rows)} rows. Cloud Storage: {'✅' if cloud_success else '❌'}")
         last_poll_error = None
     
     return {
@@ -236,7 +264,7 @@ def poll_once():
         "timestamp": last_poll_at
     }
 
-# Cloud Scheduler Endpoint - This is the key addition!
+# Cloud Scheduler Endpoint
 @app.route("/api/poll", methods=['POST', 'GET'])
 def trigger_poll():
     """Endpoint for Cloud Scheduler to trigger polling"""
@@ -277,33 +305,36 @@ th { background: #f5f5f5; }
 .aqi-unhealthy { background: #ff0000; color: white; }
 .aqi-very-unhealthy { background: #8f3f97; color: white; }
 .aqi-hazardous { background: #7e0023; color: white; }
-.next-poll { margin-top: 1rem; padding: 10px; background: #f0f8ff; border-radius: 5px; }
 .location-section { margin-bottom: 2rem; }
 .location-header { background: #f8f9fa; padding: 10px; border-radius: 5px; margin-bottom: 10px; }
 .cloud-scheduler-info { background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 1rem 0; }
+.last-updated { color: #666; font-style: italic; margin-top: 5px; }
+.cloud-storage-info { background: #e3f2fd; padding: 10px; border-radius: 5px; margin: 1rem 0; }
 </style>
 </head>
 <body>
   <h1>Yerevan Air Quality Monitor</h1>
   <div class="status">
     <span class="badge">Cloud Scheduler Powered</span>
+    <span class="badge">Cloud Storage Backed</span>
     <span class="badge">Monitoring ''' + str(len(MONITORING_LOCATIONS)) + ''' locations</span>
     <span class="badge"><a href="/download.csv">Download Full CSV</a></span>
     <span class="badge"><a href="/api/health">Health Check</a></span>
   </div>
 
+  <div class="cloud-storage-info">
+    <strong>☁️ Cloud Storage Integration</strong><br>
+    All data is automatically saved to Google Cloud Storage for permanent storage.
+  </div>
+
   <div class="cloud-scheduler-info">
     <strong>🔔 Cloud Scheduler Integration</strong><br>
-    This app uses Google Cloud Scheduler to trigger polling automatically.<br>    
+    This app uses Google Cloud Scheduler to trigger polling automatically.<br>
+    Manual poll: <a href="/api/poll" target="_blank">Trigger Now</a>
   </div>
 
   <div id="current-data">
     <!-- Current data will be populated by JavaScript -->
-  </div>
-
-  <h2>Last 24 Hours Data</h2>
-  <div id="recent-data">
-    <!-- Recent data will be populated by JavaScript -->
   </div>
 
 <script>
@@ -317,16 +348,19 @@ function getAQIClass(aqi) {
 }
 
 function formatLocationData(locationData) {
+    const timestamp = locationData.timestamp_utc ? new Date(locationData.timestamp_utc) : null;
+    const timeString = timestamp ? timestamp.toLocaleString() : 'N/A';
+    
     return `
         <div class="location-section">
             <div class="location-header">
                 <h3>${locationData.description}</h3>
                 <small>${locationData.latitude.toFixed(4)}, ${locationData.longitude.toFixed(4)}</small>
+                <div class="last-updated">Last updated: ${timeString}</div>
             </div>
             <table>
                 <thead>
                     <tr>
-                        <th>Last Update (UTC)</th>
                         <th>Overall AQI</th>           
                         <th>PM2.5 (μg/m³)</th>
                         <th>PM10 (μg/m³)</th>
@@ -338,7 +372,6 @@ function formatLocationData(locationData) {
                 </thead>
                 <tbody>
                     <tr>
-                        <td>${locationData.timestamp_utc ? new Date(locationData.timestamp_utc).toLocaleString() : 'N/A'}</td>
                         <td class="${locationData.overall_aqi ? getAQIClass(locationData.overall_aqi) : ''}">${locationData.overall_aqi || 'N/A'}</td>             
                         <td>${locationData.PM25_ugm3 || 'N/A'}</td>
                         <td>${locationData.PM10_ugm3 || 'N/A'}</td>
@@ -368,67 +401,6 @@ async function refreshData() {
             currentDataDiv.innerHTML += formatLocationData(locationData);
         });
         
-        const recentRes = await fetch('/api/recent', { cache: 'no-store' });
-        const recentData = await recentRes.json();
-        
-        const recentDataDiv = document.getElementById('recent-data');
-        recentDataDiv.innerHTML = '';
-        
-        // Group recent data by location
-        const dataByLocation = {};
-        recentData.forEach(reading => {
-            if (!dataByLocation[reading.location_label]) {
-                dataByLocation[reading.location_label] = [];
-            }
-            dataByLocation[reading.location_label].push(reading);
-        });
-        
-        // Create tables for each location
-        Object.entries(dataByLocation).forEach(([locationLabel, readings]) => {
-            const locationReadings = readings
-                .sort((a, b) => new Date(b.timestamp_utc) - new Date(a.timestamp_utc))
-                .slice(0, 10);
-            
-            let tableHtml = `
-                <div class="location-section">
-                    <div class="location-header">
-                        <h3>${readings[0].description} - Last 10 Readings</h3>
-                    </div>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Timestamp (UTC)</th>
-                                <th>AQI</th>
-                                <th>PM2.5</th>
-                                <th>PM10</th>
-                                <th>NO2</th>
-                                <th>O3</th>
-                                <th>CO</th>
-                                <th>SO2</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-            `;
-            
-            locationReadings.forEach(reading => {
-                tableHtml += `
-                    <tr>
-                        <td>${new Date(reading.timestamp_utc).toLocaleString()}</td>
-                        <td class="${reading.overall_aqi ? getAQIClass(reading.overall_aqi) : ''}">${reading.overall_aqi || 'N/A'}</td>
-                        <td>${reading.PM25_ugm3 || 'N/A'}</td>
-                        <td>${reading.PM10_ugm3 || 'N/A'}</td>
-                        <td>${reading.NO2_ugm3 || 'N/A'}</td>
-                        <td>${reading.O3_ugm3 || 'N/A'}</td>
-                        <td>${reading.CO_ppb || 'N/A'}</td>
-                        <td>${reading.SO2_ugm3 || 'N/A'}</td>
-                    </tr>
-                `;
-            });
-            
-            tableHtml += '</tbody></table></div>';
-            recentDataDiv.innerHTML += tableHtml;
-        });
-        
     } catch(e) { 
         console.error('Error refreshing data:', e); 
     }
@@ -449,11 +421,6 @@ refreshData();
 def api_latest():
     return jsonify(latest_cache)
 
-@app.route("/api/recent")
-def api_recent():
-    cleanup_old_data()
-    return jsonify(recent_data_cache)
-
 @app.route("/download.csv")
 def download_csv():
     return send_file(CSV_PATH, as_attachment=True, download_name="yerevan_air_quality_data.csv")
@@ -464,30 +431,22 @@ def api_health():
         "last_poll_at": last_poll_at,
         "last_poll_error": last_poll_error,
         "rows_written_total": rows_written_total,
-        "recent_data_points": len(recent_data_cache),
         "locations_monitored": len(MONITORING_LOCATIONS),
         "service_url": "https://armeniapollutionanalysis-578058838716.europe-west1.run.app"
     })
 
-# Debug endpoint
-@app.route("/debug/env")
-def debug_env():
-    """Check environment variables"""
-    return jsonify({
-        "GOOGLE_AIR_QUALITY_API_KEY": "SET" if os.getenv("GOOGLE_AIR_QUALITY_API_KEY") else "NOT SET",
-        "POLL_INTERVAL_SEC": os.getenv("POLL_INTERVAL_SEC"),
-        "CSV_PATH": CSV_PATH,
-        "HOST": HOST,
-        "PORT": PORT
-    })
-
 if __name__ == "__main__":
+    # Load from Cloud Storage or create new
+    print("🔧 Initializing Cloud Storage...")
+    if not load_from_cloud_storage():
+        ensure_csv()
+    
     # Do one initial poll at startup
     print(f"🚀 Starting Yerevan Air Quality Monitor")
     print(f"📍 Monitoring {len(MONITORING_LOCATIONS)} locations")
     print(f"🔧 Environment check:")
     print(f"   - API Key: {'SET' if API_KEY else 'NOT SET'}")
-    print(f"   - CSV Path: {CSV_PATH}")
+    print(f"   - Cloud Storage Bucket: {BUCKET_NAME}")
     print(f"   - Port: {PORT}")
     
     # Initial poll
