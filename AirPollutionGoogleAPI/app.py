@@ -9,9 +9,9 @@ from flask import Flask, jsonify, send_file, Response
 # Config
 # ----------------------------
 POLL_INTERVAL_SEC = int(os.getenv("POLL_INTERVAL_SEC", "3600"))  # 1 hour default
-CSV_PATH = os.getenv("CSV_PATH", "pollution_data.csv")
+CSV_PATH = os.getenv("CSV_PATH", "/tmp/pollution_data.csv")  # Use /tmp for Cloud Run
 HOST = os.getenv("HOST", "0.0.0.0")
-PORT = int(os.getenv("PORT", "8000"))
+PORT = int(os.getenv("PORT", "8080"))  # Cloud Run uses 8080
 
 # Google Air Quality API
 AIR_QUALITY_URL = "https://airquality.googleapis.com/v1/currentConditions:lookup"
@@ -75,20 +75,25 @@ POLLUTANT_INFO = {
     'PM10': {'name': 'PM10', 'units': 'μg/m³', 'column_suffix': 'ugm3'}
 }
 
-# CSV headers - updated for multiple locations
+# CSV headers
 CSV_HEADER = [
     "timestamp_utc", "location_label", "latitude", "longitude", "description",
     "overall_aqi", "CO_ppb", "NO2_ugm3", "O3_ugm3", "SO2_ugm3", "PM25_ugm3", "PM10_ugm3"
 ]
 
 def ensure_csv():
-    """Create CSV file if it doesn't exist, but don't overwrite if it does"""
+    """Create CSV file if it doesn't exist"""
+    current_dir = os.getcwd()
+    print(f"📁 Current working directory: {current_dir}")
+    print(f"💾 CSV will be saved to: {os.path.abspath(CSV_PATH)}")
+    
     if not os.path.exists(CSV_PATH):
         with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(CSV_HEADER)
-        print(f"Created new CSV file: {CSV_PATH}")
+        print(f"✅ Created new CSV file: {CSV_PATH}")
     else:
-        print(f"Using existing CSV file: {CSV_PATH}")
+        file_size = os.path.getsize(CSV_PATH)
+        print(f"📊 Using existing CSV file: {CSV_PATH} (size: {file_size} bytes)")
 
 ensure_csv()
 
@@ -100,9 +105,6 @@ recent_data_cache: List[Dict[str, Any]] = []
 last_poll_at = None
 last_poll_error = None
 rows_written_total = 0
-initial_poll_done = False  # Track if initial poll has been done
-
-stop_event = threading.Event()
 
 # Air Quality API Helper
 def get_air_quality_data(latitude: float, longitude: float) -> Dict[str, Any]:
@@ -112,10 +114,7 @@ def get_air_quality_data(latitude: float, longitude: float) -> Dict[str, Any]:
     headers = {"Content-Type": "application/json"}
     payload = {
         "location": {"latitude": latitude, "longitude": longitude},
-        "extraComputations": [
-            "POLLUTANT_CONCENTRATION",
-            "LOCAL_AQI"
-        ],
+        "extraComputations": ["POLLUTANT_CONCENTRATION"],
         "universalAqi": True
     }
     
@@ -186,74 +185,75 @@ def cleanup_old_data():
     recent_data_cache = [row for row in recent_data_cache if row['timestamp_utc'] >= cutoff_iso]
 
 def poll_once():
-    global last_poll_at, last_poll_error, rows_written_total, recent_data_cache, initial_poll_done
+    global last_poll_at, last_poll_error, rows_written_total, recent_data_cache
+    
+    print(f"🚀 Starting poll at {datetime.now(timezone.utc).isoformat()}")
     
     if not API_KEY:
         last_poll_error = "GOOGLE_AIR_QUALITY_API_KEY is not set"
-        print("ERROR: GOOGLE_AIR_QUALITY_API_KEY is not set", file=sys.stderr)
-        return
+        print("❌ ERROR: GOOGLE_AIR_QUALITY_API_KEY is not set", file=sys.stderr)
+        return {"status": "error", "message": "API key not set"}
 
     all_rows = []
+    successful_locations = 0
     
     for location in MONITORING_LOCATIONS:
         try:
-            print(f"Polling air quality for {location['label']}...")
+            print(f"🔍 Polling {location['label']}...")
             raw_data = get_air_quality_data(location["latitude"], location["longitude"])
             parsed_data = parse_air_quality_data(raw_data, location)
             csv_row = create_csv_row(parsed_data)
             all_rows.append(csv_row)
             
             latest_cache[location["label"]] = csv_row
-            print(f"Success: {location['label']} - AQI: {csv_row['overall_aqi']}")
+            successful_locations += 1
+            print(f"✅ {location['label']} - AQI: {csv_row['overall_aqi']}")
             
         except Exception as e:
             error_msg = f"{location['label']}: {str(e)}"
             last_poll_error = error_msg
-            print(f"ERROR {error_msg}", file=sys.stderr)
+            print(f"❌ ERROR {error_msg}", file=sys.stderr)
     
     last_poll_at = datetime.now(timezone.utc).isoformat()
     
     if all_rows:
-        # Append to CSV - only if this is not a duplicate
-        current_timestamp = all_rows[0]['timestamp_utc']
+        # Append to CSV
+        with open(CSV_PATH, "a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=CSV_HEADER)
+            for row in all_rows:
+                writer.writerow(row)
+                rows_written_total += 1
         
-        # Check if we already have data with this timestamp in recent cache
-        existing_timestamps = {entry['timestamp_utc'] for entry in recent_data_cache}
-        
-        if current_timestamp not in existing_timestamps:
-            with open(CSV_PATH, "a", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=CSV_HEADER)
-                for row in all_rows:
-                    writer.writerow(row)
-                    rows_written_total += 1
-            
-            recent_data_cache.extend(all_rows)
-            cleanup_old_data()
-            print(f"Added new data to CSV and cache. Total rows: {rows_written_total}")
-        else:
-            print("Skipping duplicate data")
-        
+        recent_data_cache.extend(all_rows)
+        cleanup_old_data()
+        print(f"📈 Added {len(all_rows)} rows to CSV. Total: {rows_written_total}")
         last_poll_error = None
     
-    initial_poll_done = True
+    return {
+        "status": "success",
+        "locations_polled": successful_locations,
+        "total_locations": len(MONITORING_LOCATIONS),
+        "timestamp": last_poll_at
+    }
 
-def poll_loop():
-    print(f"Air Quality Poller started: interval={POLL_INTERVAL_SEC}s, CSV={CSV_PATH}")
-    print(f"Monitoring {len(MONITORING_LOCATIONS)} locations across Yerevan")
-    
-    # Wait a bit before first poll to avoid startup duplicates
-    time.sleep(2)
-    
-    while not stop_event.is_set():
-        start = time.time()
-        poll_once()
-        elapsed = time.time() - start
-        to_sleep = max(0, POLL_INTERVAL_SEC - elapsed)
-        next_poll_time = datetime.now(timezone.utc) + timedelta(seconds=to_sleep)
-        print(f"Poll completed. Next poll in {to_sleep//60:.0f} minutes at {next_poll_time.strftime('%H:%M:%S')} UTC")
-        stop_event.wait(to_sleep)
+# Cloud Scheduler Endpoint - This is the key addition!
+@app.route("/api/poll", methods=['POST', 'GET'])
+def trigger_poll():
+    """Endpoint for Cloud Scheduler to trigger polling"""
+    print("🎯 Cloud Scheduler triggered poll")
+    result = poll_once()
+    return jsonify(result)
 
-# Web Portal - Updated for multiple locations
+# Health check endpoint
+@app.route("/health")
+def health_check():
+    return jsonify({
+        "status": "healthy", 
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "service": "Yerevan Air Quality Monitor"
+    })
+
+# Web Portal
 @app.route("/")
 def index():
     html = '''
@@ -280,18 +280,22 @@ th { background: #f5f5f5; }
 .next-poll { margin-top: 1rem; padding: 10px; background: #f0f8ff; border-radius: 5px; }
 .location-section { margin-bottom: 2rem; }
 .location-header { background: #f8f9fa; padding: 10px; border-radius: 5px; margin-bottom: 10px; }
+.cloud-scheduler-info { background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 1rem 0; }
 </style>
 </head>
 <body>
   <h1>Yerevan Air Quality Monitor</h1>
   <div class="status">
-    <span class="badge">Polling every hour</span>
+    <span class="badge">Cloud Scheduler Powered</span>
     <span class="badge">Monitoring ''' + str(len(MONITORING_LOCATIONS)) + ''' locations</span>
     <span class="badge"><a href="/download.csv">Download Full CSV</a></span>
+    <span class="badge"><a href="/api/health">Health Check</a></span>
   </div>
 
-  <div id="next-poll" class="next-poll">
-    <strong>Next poll:</strong> <span id="next-poll-time">Calculating...</span>
+  <div class="cloud-scheduler-info">
+    <strong>🔔 Cloud Scheduler Integration</strong><br>
+    This app uses Google Cloud Scheduler to trigger polling automatically.<br>
+    Manual poll: <a href="/api/poll" target="_blank">Trigger Now</a>
   </div>
 
   <div id="current-data">
@@ -311,19 +315,6 @@ function getAQIClass(aqi) {
     if (aqi <= 200) return 'aqi-unhealthy';
     if (aqi <= 300) return 'aqi-very-unhealthy';
     return 'aqi-hazardous';
-}
-
-function updateNextPollTime() {
-    const now = new Date();
-    const nextHour = new Date(now);
-    nextHour.setHours(nextHour.getHours() + 1);
-    nextHour.setMinutes(0);
-    nextHour.setSeconds(0);
-    
-    const timeUntilNext = nextHour - now;
-    const minutesUntil = Math.floor(timeUntilNext / 60000);
-    document.getElementById('next-poll-time').textContent = 
-        `${nextHour.toLocaleTimeString()} (in ${minutesUntil} minutes)`;
 }
 
 function formatLocationData(locationData) {
@@ -397,7 +388,7 @@ async function refreshData() {
         Object.entries(dataByLocation).forEach(([locationLabel, readings]) => {
             const locationReadings = readings
                 .sort((a, b) => new Date(b.timestamp_utc) - new Date(a.timestamp_utc))
-                .slice(0, 10); // Show last 10 readings
+                .slice(0, 10);
             
             let tableHtml = `
                 <div class="location-section">
@@ -444,10 +435,9 @@ async function refreshData() {
     }
 }
 
-updateNextPollTime();
-refreshData();
-setInterval(updateNextPollTime, 60000);
+// Auto-refresh data every 30 seconds
 setInterval(refreshData, 30000);
+refreshData();
 </script>
 
 </body>
@@ -471,46 +461,38 @@ def download_csv():
 
 @app.route("/api/health")
 def api_health():
-    next_poll_time = None
-    if last_poll_at:
-        last_poll_dt = datetime.fromisoformat(last_poll_at.replace('Z', '+00:00'))
-        next_poll_dt = last_poll_dt + timedelta(seconds=POLL_INTERVAL_SEC)
-        next_poll_time = next_poll_dt.isoformat()
-    
     return jsonify({
         "last_poll_at": last_poll_at,
-        "next_poll_at": next_poll_time,
         "last_poll_error": last_poll_error,
         "rows_written_total": rows_written_total,
         "recent_data_points": len(recent_data_cache),
         "locations_monitored": len(MONITORING_LOCATIONS),
-        "locations_list": [loc["label"] for loc in MONITORING_LOCATIONS]
+        "service_url": "https://armeniapollutionanalysis-578058838716.europe-west1.run.app"
     })
 
-# Lifecycle Management
-def handle_sigterm(signum, frame):
-    stop_event.set()
-
-signal.signal(signal.SIGTERM, handle_sigterm)
-signal.signal(signal.SIGINT, handle_sigterm)
+# Debug endpoint
+@app.route("/debug/env")
+def debug_env():
+    """Check environment variables"""
+    return jsonify({
+        "GOOGLE_AIR_QUALITY_API_KEY": "SET" if os.getenv("GOOGLE_AIR_QUALITY_API_KEY") else "NOT SET",
+        "POLL_INTERVAL_SEC": os.getenv("POLL_INTERVAL_SEC"),
+        "CSV_PATH": CSV_PATH,
+        "HOST": HOST,
+        "PORT": PORT
+    })
 
 if __name__ == "__main__":
-    # Delete old CSV to start fresh
-    if os.path.exists(CSV_PATH):
-        os.remove(CSV_PATH)
-        print("Deleted old CSV file")
-    ensure_csv()
+    # Do one initial poll at startup
+    print(f"🚀 Starting Yerevan Air Quality Monitor")
+    print(f"📍 Monitoring {len(MONITORING_LOCATIONS)} locations")
+    print(f"🔧 Environment check:")
+    print(f"   - API Key: {'SET' if API_KEY else 'NOT SET'}")
+    print(f"   - CSV Path: {CSV_PATH}")
+    print(f"   - Port: {PORT}")
     
-    # Start polling thread
-    t = threading.Thread(target=poll_loop, daemon=True)
-    t.start()
+    # Initial poll
+    poll_once()
     
-    try:
-        print(f"Starting web server on {HOST}:{PORT}")
-        print(f"Monitoring {len(MONITORING_LOCATIONS)} locations:")
-        for loc in MONITORING_LOCATIONS:
-            print(f"  - {loc['label']}: {loc['description']}")
-        app.run(host=HOST, port=PORT, debug=False, use_reloader=False)
-    finally:
-        stop_event.set()
-        t.join(timeout=5)
+    print(f"🌐 Starting web server on {HOST}:{PORT}")
+    app.run(host=HOST, port=PORT, debug=False)
