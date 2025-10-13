@@ -421,9 +421,36 @@ refreshData();
 def api_latest():
     return jsonify(latest_cache)
 
+#@app.route("/download.csv")
+#def download_csv():
+#    return send_file(CSV_PATH, as_attachment=True, download_name="yerevan_air_quality_data.csv")
+
 @app.route("/download.csv")
 def download_csv():
-    return send_file(CSV_PATH, as_attachment=True, download_name="yerevan_air_quality_data.csv")
+    try:
+        # Create a temporary file
+        temp_path = "/tmp/download_temp.csv"
+        
+        # Download from Cloud Storage
+        client = storage.Client()
+        bucket = client.bucket(BUCKET_NAME)
+        blob = bucket.blob(CSV_FILENAME)
+        
+        if not blob.exists():
+            return "CSV file not found in Cloud Storage", 404
+            
+        blob.download_to_filename(temp_path)
+        
+        return send_file(
+            temp_path, 
+            as_attachment=True, 
+            download_name="yerevan_air_quality_data.csv",
+            mimetype="text/csv"
+        )
+    except Exception as e:
+        print(f"❌ Error downloading CSV: {e}")
+        return f"Error downloading CSV: {e}", 500
+
 
 @app.route("/api/health")
 def api_health():
