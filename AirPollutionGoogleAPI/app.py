@@ -8,7 +8,7 @@ from flask import Flask, jsonify, send_file, Response
 # ----------------------------
 # Config
 # ----------------------------
-POLL_INTERVAL_SEC = int(os.getenv("POLL_INTERVAL_SEC", "3600"))  # 1 hour default
+POLL_INTERVAL_SEC = int(os.getenv("POLL_INTERVAL_SEC", "60"))  # 1 hour default
 CSV_PATH = os.getenv("CSV_PATH", "pollution_data.csv")
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
@@ -17,13 +17,49 @@ PORT = int(os.getenv("PORT", "8000"))
 AIR_QUALITY_URL = "https://airquality.googleapis.com/v1/currentConditions:lookup"
 API_KEY = os.getenv("GOOGLE_AIR_QUALITY_API_KEY")
 
-# Only Yerevan Center
+# Multiple Yerevan Locations
 MONITORING_LOCATIONS = [
     {
         "label": "Yerevan_Center",
         "latitude": 40.1814,
         "longitude": 44.5146,
-        "description": "Yerevan City Center"
+        "description": "Yerevan City Center - Republic Square"
+    },
+    {
+        "label": "Yerevan_North",
+        "latitude": 40.2100,
+        "longitude": 44.5830,
+        "description": "Yerevan Northern District - Avan"
+    },
+    {
+        "label": "Yerevan_South", 
+        "latitude": 40.1550,
+        "longitude": 44.4750,
+        "description": "Yerevan Southern District - Shengavit"
+    },
+    {
+        "label": "Yerevan_West",
+        "latitude": 40.1990,
+        "longitude": 44.4690,
+        "description": "Yerevan Western District - Ajapnyak"
+    },
+    {
+        "label": "Yerevan_East",
+        "latitude": 40.1750,
+        "longitude": 44.5330,
+        "description": "Yerevan Eastern District - Nor Nork"
+    },
+    {
+        "label": "Yerevan_Northwest",
+        "latitude": 40.2050,
+        "longitude": 44.5000,
+        "description": "Yerevan Northwest - Eritasardakan"
+    },
+    {
+        "label": "Yerevan_Southwest",
+        "latitude": 40.1670,
+        "longitude": 44.4330,
+        "description": "Yerevan Southwest - Malatia"
     }
 ]
 
@@ -34,13 +70,15 @@ POLLUTANT_INFO = {
     'CO': {'name': 'Carbon Monoxide', 'units': 'ppb', 'column_suffix': 'ppb'},
     'NO2': {'name': 'Nitrogen Dioxide', 'units': 'μg/m³', 'column_suffix': 'ugm3'},
     'O3': {'name': 'Ozone', 'units': 'μg/m³', 'column_suffix': 'ugm3'},
-    'SO2': {'name': 'Sulfur Dioxide', 'units': 'μg/m³', 'column_suffix': 'ugm3'}
+    'SO2': {'name': 'Sulfur Dioxide', 'units': 'μg/m³', 'column_suffix': 'ugm3'},
+    'PM25': {'name': 'PM2.5', 'units': 'μg/m³', 'column_suffix': 'ugm3'},
+    'PM10': {'name': 'PM10', 'units': 'μg/m³', 'column_suffix': 'ugm3'}
 }
 
-# CSV headers
+# CSV headers - updated for multiple locations
 CSV_HEADER = [
     "timestamp_utc", "location_label", "latitude", "longitude", "description",
-    "overall_aqi", "CO_ppb", "NO2_ugm3", "O3_ugm3", "SO2_ugm3"
+    "overall_aqi", "CO_ppb", "NO2_ugm3", "O3_ugm3", "SO2_ugm3", "PM25_ugm3", "PM10_ugm3"
 ]
 
 def ensure_csv():
@@ -75,9 +113,8 @@ def get_air_quality_data(latitude: float, longitude: float) -> Dict[str, Any]:
     payload = {
         "location": {"latitude": latitude, "longitude": longitude},
         "extraComputations": [
-            "POLLUTANT_ADDITIONAL_INFO",
-            "DOMINANT_POLLUTANT_CONCENTRATION",
-            "POLLUTANT_CONCENTRATION"
+            "POLLUTANT_CONCENTRATION",
+            "LOCAL_AQI"
         ],
         "universalAqi": True
     }
@@ -202,6 +239,7 @@ def poll_once():
 
 def poll_loop():
     print(f"Air Quality Poller started: interval={POLL_INTERVAL_SEC}s, CSV={CSV_PATH}")
+    print(f"Monitoring {len(MONITORING_LOCATIONS)} locations across Yerevan")
     
     # Wait a bit before first poll to avoid startup duplicates
     time.sleep(2)
@@ -215,7 +253,7 @@ def poll_loop():
         print(f"Poll completed. Next poll in {to_sleep//60:.0f} minutes at {next_poll_time.strftime('%H:%M:%S')} UTC")
         stop_event.wait(to_sleep)
 
-# Web Portal
+# Web Portal - Updated for multiple locations
 @app.route("/")
 def index():
     html = '''
@@ -240,12 +278,15 @@ th { background: #f5f5f5; }
 .aqi-very-unhealthy { background: #8f3f97; color: white; }
 .aqi-hazardous { background: #7e0023; color: white; }
 .next-poll { margin-top: 1rem; padding: 10px; background: #f0f8ff; border-radius: 5px; }
+.location-section { margin-bottom: 2rem; }
+.location-header { background: #f8f9fa; padding: 10px; border-radius: 5px; margin-bottom: 10px; }
 </style>
 </head>
 <body>
   <h1>Yerevan Air Quality Monitor</h1>
   <div class="status">
     <span class="badge">Polling every hour</span>
+    <span class="badge">Monitoring ''' + str(len(MONITORING_LOCATIONS)) + ''' locations</span>
     <span class="badge"><a href="/download.csv">Download Full CSV</a></span>
   </div>
 
@@ -253,35 +294,14 @@ th { background: #f5f5f5; }
     <strong>Next poll:</strong> <span id="next-poll-time">Calculating...</span>
   </div>
 
-  <h2>Current Air Quality - Yerevan Center</h2>
-  <table id="current">
-    <thead>
-      <tr>
-        <th>Last Update (UTC)</th>
-        <th>Overall AQI</th>           
-        <th>NO2 (μg/m³)</th>
-        <th>O3 (μg/m³)</th>
-        <th>CO (ppb)</th>
-        <th>SO2 (μg/m³)</th>
-      </tr>
-    </thead>
-    <tbody id="current-body"></tbody>
-  </table>
+  <div id="current-data">
+    <!-- Current data will be populated by JavaScript -->
+  </div>
 
   <h2>Last 24 Hours Data</h2>
-  <table id="recent">
-    <thead>
-      <tr>
-        <th>Timestamp (UTC)</th>
-        <th>AQI</th>        
-        <th>NO2</th>
-        <th>O3</th>
-        <th>CO</th>
-        <th>SO2</th>
-      </tr>
-    </thead>
-    <tbody id="recent-body"></tbody>
-  </table>
+  <div id="recent-data">
+    <!-- Recent data will be populated by JavaScript -->
+  </div>
 
 <script>
 function getAQIClass(aqi) {
@@ -306,55 +326,117 @@ function updateNextPollTime() {
         `${nextHour.toLocaleTimeString()} (in ${minutesUntil} minutes)`;
 }
 
+function formatLocationData(locationData) {
+    return `
+        <div class="location-section">
+            <div class="location-header">
+                <h3>${locationData.description}</h3>
+                <small>${locationData.latitude.toFixed(4)}, ${locationData.longitude.toFixed(4)}</small>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Last Update (UTC)</th>
+                        <th>Overall AQI</th>           
+                        <th>PM2.5 (μg/m³)</th>
+                        <th>PM10 (μg/m³)</th>
+                        <th>NO2 (μg/m³)</th>
+                        <th>O3 (μg/m³)</th>
+                        <th>CO (ppb)</th>
+                        <th>SO2 (μg/m³)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>${locationData.timestamp_utc ? new Date(locationData.timestamp_utc).toLocaleString() : 'N/A'}</td>
+                        <td class="${locationData.overall_aqi ? getAQIClass(locationData.overall_aqi) : ''}">${locationData.overall_aqi || 'N/A'}</td>             
+                        <td>${locationData.PM25_ugm3 || 'N/A'}</td>
+                        <td>${locationData.PM10_ugm3 || 'N/A'}</td>
+                        <td>${locationData.NO2_ugm3 || 'N/A'}</td>
+                        <td>${locationData.O3_ugm3 || 'N/A'}</td>
+                        <td>${locationData.CO_ppb || 'N/A'}</td>
+                        <td>${locationData.SO2_ugm3 || 'N/A'}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
 async function refreshData() {
     try {
         const latestRes = await fetch('/api/latest', { cache: 'no-store' });
         const latestData = await latestRes.json();
         
-        const currentBody = document.getElementById('current-body');
-        currentBody.innerHTML = '';
+        const currentDataDiv = document.getElementById('current-data');
+        currentDataDiv.innerHTML = '<h2>Current Air Quality Across Yerevan</h2>';
         
-        Object.values(latestData).forEach(location => {
-            const row = document.createElement('tr');
-            const aqiClass = location.overall_aqi ? getAQIClass(location.overall_aqi) : '';
-            row.innerHTML = `
-                <td>${location.timestamp_utc ? new Date(location.timestamp_utc).toLocaleString() : 'N/A'}</td>
-                <td class="${aqiClass}">${location.overall_aqi || 'N/A'}</td>             
-                <td>${location.NO2_ugm3 || 'N/A'}</td>
-                <td>${location.O3_ugm3 || 'N/A'}</td>
-                <td>${location.CO_ppb || 'N/A'}</td>
-                <td>${location.SO2_ugm3 || 'N/A'}</td>
-            `;
-            currentBody.appendChild(row);
+        // Sort locations for consistent display
+        const sortedLocations = Object.entries(latestData).sort(([a], [b]) => a.localeCompare(b));
+        
+        sortedLocations.forEach(([label, locationData]) => {
+            currentDataDiv.innerHTML += formatLocationData(locationData);
         });
         
         const recentRes = await fetch('/api/recent', { cache: 'no-store' });
         const recentData = await recentRes.json();
         
-        const recentBody = document.getElementById('recent-body');
-        recentBody.innerHTML = '';
+        const recentDataDiv = document.getElementById('recent-data');
+        recentDataDiv.innerHTML = '';
         
-        // Remove duplicates by timestamp
-        const uniqueEntries = {};
+        // Group recent data by location
+        const dataByLocation = {};
         recentData.forEach(reading => {
-            uniqueEntries[reading.timestamp_utc] = reading;
+            if (!dataByLocation[reading.location_label]) {
+                dataByLocation[reading.location_label] = [];
+            }
+            dataByLocation[reading.location_label].push(reading);
         });
         
-        const uniqueReadings = Object.values(uniqueEntries)
-            .sort((a, b) => new Date(b.timestamp_utc) - new Date(a.timestamp_utc));
-        
-        uniqueReadings.forEach(reading => {
-            const row = document.createElement('tr');
-            const aqiClass = reading.overall_aqi ? getAQIClass(reading.overall_aqi) : '';
-            row.innerHTML = `
-                <td>${new Date(reading.timestamp_utc).toLocaleString()}</td>
-                <td class="${aqiClass}">${reading.overall_aqi || 'N/A'}</td>
-                <td>${reading.NO2_ugm3 || 'N/A'}</td>
-                <td>${reading.O3_ugm3 || 'N/A'}</td>
-                <td>${reading.CO_ppb || 'N/A'}</td>
-                <td>${reading.SO2_ugm3 || 'N/A'}</td>
+        // Create tables for each location
+        Object.entries(dataByLocation).forEach(([locationLabel, readings]) => {
+            const locationReadings = readings
+                .sort((a, b) => new Date(b.timestamp_utc) - new Date(a.timestamp_utc))
+                .slice(0, 10); // Show last 10 readings
+            
+            let tableHtml = `
+                <div class="location-section">
+                    <div class="location-header">
+                        <h3>${readings[0].description} - Last 10 Readings</h3>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Timestamp (UTC)</th>
+                                <th>AQI</th>
+                                <th>PM2.5</th>
+                                <th>PM10</th>
+                                <th>NO2</th>
+                                <th>O3</th>
+                                <th>CO</th>
+                                <th>SO2</th>
+                            </tr>
+                        </thead>
+                        <tbody>
             `;
-            recentBody.appendChild(row);
+            
+            locationReadings.forEach(reading => {
+                tableHtml += `
+                    <tr>
+                        <td>${new Date(reading.timestamp_utc).toLocaleString()}</td>
+                        <td class="${reading.overall_aqi ? getAQIClass(reading.overall_aqi) : ''}">${reading.overall_aqi || 'N/A'}</td>
+                        <td>${reading.PM25_ugm3 || 'N/A'}</td>
+                        <td>${reading.PM10_ugm3 || 'N/A'}</td>
+                        <td>${reading.NO2_ugm3 || 'N/A'}</td>
+                        <td>${reading.O3_ugm3 || 'N/A'}</td>
+                        <td>${reading.CO_ppb || 'N/A'}</td>
+                        <td>${reading.SO2_ugm3 || 'N/A'}</td>
+                    </tr>
+                `;
+            });
+            
+            tableHtml += '</tbody></table></div>';
+            recentDataDiv.innerHTML += tableHtml;
         });
         
     } catch(e) { 
@@ -385,7 +467,7 @@ def api_recent():
 
 @app.route("/download.csv")
 def download_csv():
-    return send_file(CSV_PATH, as_attachment=True, download_name="air_quality_data.csv")
+    return send_file(CSV_PATH, as_attachment=True, download_name="yerevan_air_quality_data.csv")
 
 @app.route("/api/health")
 def api_health():
@@ -400,7 +482,9 @@ def api_health():
         "next_poll_at": next_poll_time,
         "last_poll_error": last_poll_error,
         "rows_written_total": rows_written_total,
-        "recent_data_points": len(recent_data_cache)
+        "recent_data_points": len(recent_data_cache),
+        "locations_monitored": len(MONITORING_LOCATIONS),
+        "locations_list": [loc["label"] for loc in MONITORING_LOCATIONS]
     })
 
 # Lifecycle Management
@@ -423,6 +507,9 @@ if __name__ == "__main__":
     
     try:
         print(f"Starting web server on {HOST}:{PORT}")
+        print(f"Monitoring {len(MONITORING_LOCATIONS)} locations:")
+        for loc in MONITORING_LOCATIONS:
+            print(f"  - {loc['label']}: {loc['description']}")
         app.run(host=HOST, port=PORT, debug=False, use_reloader=False)
     finally:
         stop_event.set()
