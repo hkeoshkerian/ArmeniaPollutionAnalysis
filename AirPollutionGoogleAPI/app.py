@@ -8,7 +8,7 @@ from flask import Flask, jsonify, send_file, Response
 # ----------------------------
 # Config
 # ----------------------------
-POLL_INTERVAL_SEC = int(os.getenv("POLL_INTERVAL_SEC", "60"))  # 1 hour default
+POLL_INTERVAL_SEC = int(os.getenv("POLL_INTERVAL_SEC", "3600"))  # 1 hour default
 CSV_PATH = os.getenv("CSV_PATH", "pollution_data.csv")
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
