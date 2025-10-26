@@ -359,92 +359,83 @@ setInterval(refreshTable, 15000);
 let combinedChart;
 
 async function buildChart(){
-  const res = await fetch('/api/all_history?limit=' + encodeURIComponent(WINDOW_LIMIT), { cache: 'no-store' });
-  const all = await res.json();
+  try {
+    const res = await fetch('/api/all_history?limit=' + encodeURIComponent(WINDOW_LIMIT), { cache: 'no-store' });
+    const all = await res.json();
 
-  const labels = Object.keys(all).sort();
-  const datasets = labels.map((label, i) => {
-    const raw = (all[label] || []).filter(p => p && p[1] != null);
-    
-    // Convert to proper time-based data points
-    const points = raw.map(p => ({ 
-      x: luxon.DateTime.fromISO(p[0]).toJSDate(), // Use JSDate instead of milliseconds
-      y: p[1] 
-    }));
+    const labels = Object.keys(all).sort();
+    const datasets = labels.map((label, i) => {
+      const raw = (all[label] || []).filter(p => p && p[1] != null);
+      
+      // Convert timestamps to simple time strings for x-axis
+      const points = raw.map(p => {
+        const dt = luxon.DateTime.fromISO(p[0]);
+        return {
+          x: dt.toFormat('HH:mm:ss'),
+          y: p[1],
+          fullTime: dt.toLocaleString(luxon.DateTime.DATETIME_MED)
+        };
+      });
 
-    const hue = Math.floor(i * 360 / Math.max(1, labels.length));
-    return {
-      label,
-      data: points,
-      showLine: true,
-      spanGaps: true,
-      borderColor: `hsl(${hue}, 70%, 45%)`,
-      backgroundColor: `hsl(${hue}, 70%, 45%)`,
-      borderWidth: 2,
-      pointRadius: 3,
-      pointHoverRadius: 5,
-      tension: 0.1
-    };
-  });
+      const hue = Math.floor(i * 360 / Math.max(1, labels.length));
+      return {
+        label,
+        data: points,
+        showLine: true,
+        spanGaps: true,
+        borderColor: `hsl(${hue}, 70%, 45%)`,
+        backgroundColor: `hsl(${hue}, 70%, 45%)`,
+        borderWidth: 2,
+        pointRadius: 3,
+        pointHoverRadius: 5,
+        tension: 0.1
+      };
+    });
 
-  if (combinedChart) combinedChart.destroy();
-  const ctx = document.getElementById('combined').getContext('2d');
-  combinedChart = new Chart(ctx, {
-    type: 'line',
-    data: { datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      parsing: false,
-      animation: false,
-      interaction: { mode: 'nearest', intersect: false },
-      elements: { point: { radius: 3 } },
-      plugins: {
-        legend: { position: 'bottom' },
-        tooltip: {
-          callbacks: {
-            title: function(items) {
-              if (items.length > 0) {
-                const timestamp = items[0].parsed.x;
-                return luxon.DateTime.fromJSDate(timestamp).toLocaleString(luxon.DateTime.DATETIME_MED);
-              }
-              return '';
-            },
-            label: item => `${item.dataset.label}: ${item.formattedValue}`
-          }
-        }
-      },
-      scales: {
-        x: {
-          type: 'time',
-          time: {
-            unit: 'minute',
-            displayFormats: {
-              minute: 'HH:mm',
-              hour: 'HH:mm'
-            },
-            tooltipFormat: 'HH:mm:ss'
-          },
-          title: { display: true, text: 'Time' },
-          ticks: {
-            autoSkip: true,
-            maxTicksLimit: 10
-          },
-          // Remove fixed min/max to let Chart.js auto-scale
-          adapters: {
-            date: {
-              locale: luxon.DateTime.DATETIME_MED
+    if (combinedChart) combinedChart.destroy();
+    const ctx = document.getElementById('combined').getContext('2d');
+    combinedChart = new Chart(ctx, {
+      type: 'line',
+      data: { datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: 'nearest', intersect: false },
+        plugins: {
+          legend: { position: 'bottom' },
+          tooltip: {
+            callbacks: {
+              title: function(items) {
+                if (items.length > 0 && items[0].raw.fullTime) {
+                  return items[0].raw.fullTime;
+                }
+                return '';
+              },
+              label: item => `${item.dataset.label}: ${item.formattedValue}`
             }
           }
         },
-        y: {
-          min: 0.5,
-          max: 3,
-          title: { display: true, text: 'Congestion Index (duration / static)' }
+        scales: {
+          x: {
+            type: 'category', // Use category scale for time strings
+            title: { display: true, text: 'Time' },
+            ticks: {
+              autoSkip: true,
+              maxTicksLimit: 10
+            }
+          },
+          y: {
+            min: 0.5,
+            max: 3,
+            title: { display: true, text: 'Congestion Index (duration / static)' }
+          }
         }
       }
-    }
-  });
+    });
+  } catch (error) {
+    console.error('Error building chart:', error);
+  }
 }
 
 buildChart();
