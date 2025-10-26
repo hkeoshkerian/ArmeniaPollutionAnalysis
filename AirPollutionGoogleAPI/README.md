@@ -16,10 +16,12 @@ The application is deployed on Render.com and available at:
 - **24-hour History**: View trends from the past day
 
 ## Pollutants Monitored
-- **NO₂** - Nitrogen dioxide (μg/m³)
-- **O₃** - Ozone (μg/m³)
+- **NO₂** - Nitrogen dioxide (ppb)
+- **O₃** - Ozone (ppb)
 - **CO** - Carbon monoxide (ppb)
-- **SO₂** - Sulfur dioxide (μg/m³)
+- **SO₂** - Sulfur dioxide (ppb)
+- **PM2.5** - PM2.5 (μg/m³)
+- **PM10** - PM10 (μg/m³)
 - **Overall AQI** - Universal Air Quality Index
 
 ![Alt text](YerevanAirQualityMonitor.png)
