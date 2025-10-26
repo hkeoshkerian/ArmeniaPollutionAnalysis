@@ -279,9 +279,18 @@ th { background: #f5f5f5; }
 .status { margin: 0.2rem 0 1rem 0; }
 .badge { display:inline-block; padding:2px 6px; border-radius:6px; background:#eee; margin-right:6px; }
 .chartwrap { margin: 1.2rem 0; }
-#combined { width: 100%; height: 380px; }
+#combined { width: 100%; height: 400px; }
 .cloud-scheduler-info { background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 1rem 0; }
 .gcs-info { background: #e8f0f5; padding: 15px; border-radius: 5px; margin: 1rem 0; }
+.legend-controls { background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 1rem 0; max-height: 200px; overflow-y: auto; border: 1px solid #ddd; }
+.legend-buttons { margin-bottom: 10px; }
+.legend-btn { padding: 5px 10px; margin-right: 5px; background: #007cba; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px; }
+.legend-btn:hover { background: #005a87; }
+.legend-checkboxes { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 5px; }
+.legend-item { display: flex; align-items: center; margin-bottom: 3px; }
+.legend-item input { margin-right: 8px; }
+.legend-item label { font-size: 12px; cursor: pointer; }
+.legend-color { display: inline-block; width: 12px; height: 12px; margin-right: 5px; border-radius: 2px; }
 </style>
 </head>
 <body>
@@ -296,7 +305,7 @@ th { background: #f5f5f5; }
 
   <div class="cloud-scheduler-info">
     <strong>Cloud Scheduler Integration</strong><br>
-    This app uses Google Cloud Scheduler to trigger polling automatically every minute.<br>
+    This app uses Google Cloud Scheduler to trigger polling automatically every 5 minutes.<br>
     Manual poll: <a href="/api/poll" target="_blank">Trigger Now</a>
   </div>
 
@@ -307,6 +316,19 @@ th { background: #f5f5f5; }
 
   <div class="chartwrap">
     <canvas id="combined"></canvas>
+  </div>
+
+  <div class="legend-controls">
+    <div class="legend-buttons">
+      <strong>Route Controls:</strong>
+      <button class="legend-btn" onclick="showAllRoutes()">Show All</button>
+      <button class="legend-btn" onclick="hideAllRoutes()">Hide All</button>
+      <button class="legend-btn" onclick="showOnlyAB()">Show Only AB (Forward)</button>
+      <button class="legend-btn" onclick="showOnlyBA()">Show Only BA (Return)</button>
+    </div>
+    <div class="legend-checkboxes" id="routeCheckboxes">
+      <!-- Checkboxes will be populated by JavaScript -->
+    </div>
   </div>
 
   <table id="live">
@@ -332,6 +354,187 @@ th { background: #f5f5f5; }
 const WINDOW_LIMIT = ''' + str(PLOT_WINDOW_LIMIT) + ''';
 const RIGHT_PAD_MINUTES = 10;
 
+let combinedChart;
+let allRoutesData = {};
+let routeColors = {};
+
+// ---------- Route Control Functions ----------
+function populateRouteCheckboxes() {
+  const container = document.getElementById('routeCheckboxes');
+  container.innerHTML = '';
+  
+  Object.keys(allRoutesData).sort().forEach(route => {
+    const color = routeColors[route] || '#cccccc';
+    const div = document.createElement('div');
+    div.className = 'legend-item';
+    div.innerHTML = `
+      <input type="checkbox" id="route_${route}" value="${route}" checked onchange="toggleRoute('${route}')">
+      <span class="legend-color" style="background-color: ${color};"></span>
+      <label for="route_${route}">${route}</label>
+    `;
+    container.appendChild(div);
+  });
+}
+
+function toggleRoute(route) {
+  if (combinedChart) {
+    const index = combinedChart.data.datasets.findIndex(ds => ds.label === route);
+    if (index !== -1) {
+      const meta = combinedChart.getDatasetMeta(index);
+      meta.hidden = !meta.hidden;
+      combinedChart.update();
+    }
+  }
+}
+
+function showAllRoutes() {
+  if (combinedChart) {
+    combinedChart.data.datasets.forEach((dataset, index) => {
+      const meta = combinedChart.getDatasetMeta(index);
+      meta.hidden = false;
+    });
+    combinedChart.update();
+    
+    // Update checkboxes
+    document.querySelectorAll('.legend-item input').forEach(checkbox => {
+      checkbox.checked = true;
+    });
+  }
+}
+
+function hideAllRoutes() {
+  if (combinedChart) {
+    combinedChart.data.datasets.forEach((dataset, index) => {
+      const meta = combinedChart.getDatasetMeta(index);
+      meta.hidden = true;
+    });
+    combinedChart.update();
+    
+    // Update checkboxes
+    document.querySelectorAll('.legend-item input').forEach(checkbox => {
+      checkbox.checked = false;
+    });
+  }
+}
+
+function showOnlyAB() {
+  if (combinedChart) {
+    combinedChart.data.datasets.forEach((dataset, index) => {
+      const meta = combinedChart.getDatasetMeta(index);
+      meta.hidden = !dataset.label.endsWith('_AB');
+    });
+    combinedChart.update();
+    
+    // Update checkboxes
+    document.querySelectorAll('.legend-item input').forEach(checkbox => {
+      const route = checkbox.value;
+      checkbox.checked = route.endsWith('_AB');
+    });
+  }
+}
+
+function showOnlyBA() {
+  if (combinedChart) {
+    combinedChart.data.datasets.forEach((dataset, index) => {
+      const meta = combinedChart.getDatasetMeta(index);
+      meta.hidden = !dataset.label.endsWith('_BA');
+    });
+    combinedChart.update();
+    
+    // Update checkboxes
+    document.querySelectorAll('.legend-item input').forEach(checkbox => {
+      const route = checkbox.value;
+      checkbox.checked = route.endsWith('_BA');
+    });
+  }
+}
+
+// ---------- Chart Functions ----------
+async function buildChart(){
+  const res = await fetch('/api/all_history?limit=' + encodeURIComponent(WINDOW_LIMIT), { cache: 'no-store' });
+  allRoutesData = await res.json();
+
+  const labels = Object.keys(allRoutesData).sort();
+  const datasets = labels.map((label, i) => {
+    const raw = (allRoutesData[label] || []).filter(p => p && p[1] != null);
+    
+    const points = raw.map(p => {
+      const dt = luxon.DateTime.fromISO(p[0]);
+      return {
+        x: dt.toFormat('HH:mm:ss'),
+        y: p[1],
+        fullTime: dt.toLocaleString(luxon.DateTime.DATETIME_MED)
+      };
+    });
+
+    const hue = Math.floor(i * 360 / Math.max(1, labels.length));
+    const color = `hsl(${hue}, 70%, 45%)`;
+    routeColors[label] = color;
+
+    return {
+      label,
+      data: points,
+      showLine: true,
+      spanGaps: true,
+      borderColor: color,
+      backgroundColor: color,
+      borderWidth: 1.5,
+      pointRadius: 2,
+      pointHoverRadius: 4,
+      tension: 0.1,
+      hidden: false
+    };
+  });
+
+  if (combinedChart) combinedChart.destroy();
+  const ctx = document.getElementById('combined').getContext('2d');
+  combinedChart = new Chart(ctx, {
+    type: 'line',
+    data: { datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'nearest', intersect: false },
+      plugins: {
+        legend: { 
+          display: false // Hide the default legend since we have our custom controls
+        },
+        tooltip: {
+          callbacks: {
+            title: function(items) {
+              if (items.length > 0 && items[0].raw.fullTime) {
+                return items[0].raw.fullTime;
+              }
+              return '';
+            },
+            label: item => `${item.dataset.label}: ${item.formattedValue}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'category',
+          title: { display: true, text: 'Time' },
+          ticks: {
+            autoSkip: true,
+            maxTicksLimit: 12
+          }
+        },
+        y: {
+          min: 0.5,
+          max: 3,
+          title: { display: true, text: 'Congestion Index (duration / static)' }
+        }
+      }
+    }
+  });
+
+  // Populate the route checkboxes after chart is created
+  populateRouteCheckboxes();
+  refreshTable();
+}
+
 // ---------- Live table ----------
 async function refreshTable(){
   try {
@@ -339,6 +542,7 @@ async function refreshTable(){
     const data = await res.json();
     const tbody = document.querySelector('#live tbody');
     tbody.innerHTML = '';
+    
     const rows = Object.values(data).sort((a,b) => (a.label || '').localeCompare(b.label || ''));
     rows.forEach(row => {
       const tr = document.createElement('tr');
@@ -352,94 +556,13 @@ async function refreshTable(){
     });
   } catch(e) { console.error(e); }
 }
-refreshTable();
-setInterval(refreshTable, 15000);
 
-// ---------- Combined congestion chart with proper timestamps ----------
-let combinedChart;
-
-async function buildChart(){
-  try {
-    const res = await fetch('/api/all_history?limit=' + encodeURIComponent(WINDOW_LIMIT), { cache: 'no-store' });
-    const all = await res.json();
-
-    const labels = Object.keys(all).sort();
-    const datasets = labels.map((label, i) => {
-      const raw = (all[label] || []).filter(p => p && p[1] != null);
-      
-      // Convert timestamps to simple time strings for x-axis
-      const points = raw.map(p => {
-        const dt = luxon.DateTime.fromISO(p[0]);
-        return {
-          x: dt.toFormat('HH:mm:ss'),
-          y: p[1],
-          fullTime: dt.toLocaleString(luxon.DateTime.DATETIME_MED)
-        };
-      });
-
-      const hue = Math.floor(i * 360 / Math.max(1, labels.length));
-      return {
-        label,
-        data: points,
-        showLine: true,
-        spanGaps: true,
-        borderColor: `hsl(${hue}, 70%, 45%)`,
-        backgroundColor: `hsl(${hue}, 70%, 45%)`,
-        borderWidth: 2,
-        pointRadius: 3,
-        pointHoverRadius: 5,
-        tension: 0.1
-      };
-    });
-
-    if (combinedChart) combinedChart.destroy();
-    const ctx = document.getElementById('combined').getContext('2d');
-    combinedChart = new Chart(ctx, {
-      type: 'line',
-      data: { datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        interaction: { mode: 'nearest', intersect: false },
-        plugins: {
-          legend: { position: 'bottom' },
-          tooltip: {
-            callbacks: {
-              title: function(items) {
-                if (items.length > 0 && items[0].raw.fullTime) {
-                  return items[0].raw.fullTime;
-                }
-                return '';
-              },
-              label: item => `${item.dataset.label}: ${item.formattedValue}`
-            }
-          }
-        },
-        scales: {
-          x: {
-            type: 'category', // Use category scale for time strings
-            title: { display: true, text: 'Time' },
-            ticks: {
-              autoSkip: true,
-              maxTicksLimit: 10
-            }
-          },
-          y: {
-            min: 0.5,
-            max: 3,
-            title: { display: true, text: 'Congestion Index (duration / static)' }
-          }
-        }
-      }
-    });
-  } catch (error) {
-    console.error('Error building chart:', error);
-  }
-}
-
+// Initialize
 buildChart();
-setInterval(buildChart, 30000);
+setInterval(() => {
+  buildChart();
+}, 30000);
+setInterval(refreshTable, 15000);
 </script>
 </body>
 </html>
