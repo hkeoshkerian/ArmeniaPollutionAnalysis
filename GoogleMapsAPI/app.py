@@ -208,7 +208,7 @@ th { background: #f5f5f5; }
 
   <div class="cloud-scheduler-info">
     <strong>Cloud Scheduler Integration</strong><br>
-    This app uses Google Cloud Scheduler to trigger polling automatically every minute.<br>
+    This app uses Google Cloud Scheduler to trigger polling automatically every 5 minutes.<br>
     Manual poll: <a href="/api/poll" target="_blank">Trigger Now</a>
   </div>
 
