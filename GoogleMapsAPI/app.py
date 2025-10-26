@@ -235,7 +235,7 @@ def poll_once():
             # Store with proper datetime for plotting
             dt = datetime.fromisoformat(row["timestamp_utc"].replace('Z', '+00:00'))
             history_cache.setdefault(row["label"], []).append(
-                (dt.isoformat(), row["congestion_index"], row["duration_sec"])
+                (row["timestamp_utc"], row["congestion_index"], row["duration_sec"])
             )
 
         last_poll_error = None
@@ -368,7 +368,7 @@ async function buildChart(){
     
     // Convert to proper time-based data points
     const points = raw.map(p => ({ 
-      x: luxon.DateTime.fromISO(p[0]).toMillis(), // Convert ISO timestamp to milliseconds
+      x: luxon.DateTime.fromISO(p[0]).toJSDate(), // Use JSDate instead of milliseconds
       y: p[1] 
     }));
 
@@ -386,11 +386,6 @@ async function buildChart(){
       tension: 0.1
     };
   });
-
-  // Calculate time window for x-axis
-  const now = luxon.DateTime.now().toMillis();
-  const xMax = now;
-  const xMin = now - (WINDOW_LIMIT * 60 * 1000); // Show last N minutes
 
   if (combinedChart) combinedChart.destroy();
   const ctx = document.getElementById('combined').getContext('2d');
@@ -411,7 +406,7 @@ async function buildChart(){
             title: function(items) {
               if (items.length > 0) {
                 const timestamp = items[0].parsed.x;
-                return luxon.DateTime.fromMillis(timestamp).toLocaleString(luxon.DateTime.DATETIME_MED);
+                return luxon.DateTime.fromJSDate(timestamp).toLocaleString(luxon.DateTime.DATETIME_MED);
               }
               return '';
             },
@@ -425,13 +420,22 @@ async function buildChart(){
           time: {
             unit: 'minute',
             displayFormats: {
-              minute: 'HH:mm'
-            }
+              minute: 'HH:mm',
+              hour: 'HH:mm'
+            },
+            tooltipFormat: 'HH:mm:ss'
           },
-          min: xMin,
-          max: xMax,
           title: { display: true, text: 'Time' },
-          ticks: { autoSkip: true, maxTicksLimit: 10 }
+          ticks: {
+            autoSkip: true,
+            maxTicksLimit: 10
+          },
+          // Remove fixed min/max to let Chart.js auto-scale
+          adapters: {
+            date: {
+              locale: luxon.DateTime.DATETIME_MED
+            }
+          }
         },
         y: {
           min: 0.5,
