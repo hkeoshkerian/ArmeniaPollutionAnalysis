@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, csv, json, time, threading, signal, sys
+import os, csv, json, time, sys
 from datetime import datetime, timezone
 from typing import List, Dict, Any
 import requests
@@ -8,11 +8,10 @@ from flask import Flask, jsonify, send_file, Response
 # ----------------------------
 # Config
 # ----------------------------
-POLL_INTERVAL_SEC = int(os.getenv("POLL_INTERVAL_SEC", "60"))
-CSV_PATH = os.getenv("CSV_PATH", "traffic_observations.csv")             # long format (1 row per corridor)
-COMPACT_WIDE_PATH = os.getenv("COMPACT_WIDE_PATH", "traffic_compact_wide.csv")  # compact wide: one column per corridor with JSON list [cong,dur,statdur,dist]
+CSV_PATH = os.getenv("CSV_PATH", "traffic_observations.csv")
+COMPACT_WIDE_PATH = os.getenv("COMPACT_WIDE_PATH", "traffic_compact_wide.csv")
 CORRIDORS_JSON = os.getenv("CORRIDORS_JSON", "corridors.json")
-PLOT_WINDOW_LIMIT = int(os.getenv("PLOT_WINDOW_LIMIT", "150"))           # how many recent points to show on the chart
+PLOT_WINDOW_LIMIT = int(os.getenv("PLOT_WINDOW_LIMIT", "150"))
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8080"))
 
@@ -46,11 +45,6 @@ def ensure_long_csv():
             csv.writer(f).writerow(CSV_HEADER)
 
 def _compact_wide_headers():
-    """
-    Compact wide header:
-    timestamp_utc, <label1>, <label2>, ...
-    Each corridor column contains a JSON list: [cong, dur, statdur, dist]
-    """
     labels = [c["label"] for c in corridors]
     return ["timestamp_utc"] + labels
 
@@ -63,17 +57,15 @@ ensure_long_csv()
 ensure_compact_wide_csv()
 
 # ----------------------------
-# In-memory caches (for APIs/portal)
+# In-memory caches
 # ----------------------------
-latest_cache: Dict[str, Dict[str, Any]] = {}   # label -> last row dict
-history_cache: Dict[str, list] = {}            # label -> list of (ts, cong, dur)
+latest_cache: Dict[str, Dict[str, Any]] = {}
+history_cache: Dict[str, list] = {}
 
 # Health tracking
 last_poll_at = None
 last_poll_error = None
 rows_written_total = 0
-
-stop_event = threading.Event()
 
 # ----------------------------
 # Helpers
@@ -90,14 +82,6 @@ def seconds_to_int(s: str):
     return None
 
 def write_compact_wide_row(ts_iso: str, rows: list):
-    """
-    Append ONE row to COMPACT_WIDE_PATH:
-      [ timestamp_utc,
-        json.dumps([cong, dur, statdur, dist]) for corridor1,
-        json.dumps([...]) for corridor2, ...
-      ]
-    If a corridor failed this poll, its cell is an empty string.
-    """
     labels = [c["label"] for c in corridors]
     by_label = { r["label"]: r for r in rows }
 
@@ -123,12 +107,14 @@ def write_compact_wide_row(ts_iso: str, rows: list):
 # ----------------------------
 def poll_once():
     global last_poll_at, last_poll_error, rows_written_total
+    
+    print(f"Starting traffic poll at {datetime.now(timezone.utc).isoformat()}")
+    
     api_key = os.getenv("GOOGLE_MAPS_API_KEY")
     if not api_key:
-        last_poll_at = datetime.now(timezone.utc).isoformat()
         last_poll_error = "GOOGLE_MAPS_API_KEY is not set"
         print("ERROR: GOOGLE_MAPS_API_KEY is not set", file=sys.stderr)
-        return
+        return {"status": "error", "message": "API key not set"}
 
     headers = {
         "X-Goog-Api-Key": api_key,
@@ -138,6 +124,7 @@ def poll_once():
 
     ts = datetime.now(timezone.utc).isoformat()
     rows = []
+    successful_corridors = 0
 
     for c in corridors:
         label = c["label"]
@@ -175,14 +162,18 @@ def poll_once():
                 "advisory_json": json.dumps(advisory, ensure_ascii=False)
             }
             rows.append(row)
+            successful_corridors += 1
+            print(f"{label} - Congestion: {cong}, Duration: {dur}s")
+            
         except Exception as e:
-            last_poll_error = f"{label}: {e}"
-            print(f"[{ts}] ERROR {label}: {e}", file=sys.stderr)
+            error_msg = f"{label}: {str(e)}"
+            last_poll_error = error_msg
+            print(f"ERROR {error_msg}", file=sys.stderr)
 
     last_poll_at = ts
 
     if rows:
-        # Append long CSV (one row per corridor)
+        # Append long CSV
         with open(CSV_PATH, "a", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=CSV_HEADER)
             for row in rows:
@@ -193,20 +184,29 @@ def poll_once():
                     (row["timestamp_utc"], row["congestion_index"], row["duration_sec"])
                 )
 
-        # Append one compact wide row (JSON lists per corridor column)
+        # Append compact wide row
         write_compact_wide_row(ts, rows)
-
-def poll_loop():
-    print(f"Poller started: interval={POLL_INTERVAL_SEC}s, CSV={CSV_PATH}, COMPACT_WIDE={COMPACT_WIDE_PATH}")
-    while not stop_event.is_set():
-        start = time.time()
-        poll_once()
-        elapsed = time.time() - start
-        to_sleep = max(0, POLL_INTERVAL_SEC - elapsed)
-        stop_event.wait(to_sleep)
+        last_poll_error = None
+    
+    return {
+        "status": "success",
+        "corridors_polled": successful_corridors,
+        "total_corridors": len(corridors),
+        "timestamp": last_poll_at
+    }
 
 # ----------------------------
-# Web portal (table + ONE chart)
+# Cloud Scheduler Endpoint
+# ----------------------------
+@app.route("/api/poll", methods=['POST', 'GET'])
+def trigger_poll():
+    """Endpoint for Cloud Scheduler to trigger polling"""
+    print("Cloud Scheduler triggered traffic poll")
+    result = poll_once()
+    return jsonify(result)
+
+# ----------------------------
+# Web portal
 # ----------------------------
 @app.route("/")
 def index():
@@ -228,15 +228,23 @@ th { background: #f5f5f5; }
 .badge { display:inline-block; padding:2px 6px; border-radius:6px; background:#eee; margin-right:6px; }
 .chartwrap { margin: 1.2rem 0; }
 #combined { width: 100%; height: 380px; }
+.cloud-scheduler-info { background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 1rem 0; }
 </style>
 </head>
 <body>
   <h1>Yerevan Traffic Monitor</h1>
   <div class="status">
-    <span class="badge">Polling every __INTERVAL__s</span>
+    <span class="badge">Cloud Scheduler Powered</span>
     <span class="badge"><a href="/export.csv">Download long CSV</a></span>
     <span class="badge"><a href="/export_compact_wide.csv">Download compact wide CSV</a></span>
     <span class="badge"><a href="/api/latest">Latest JSON</a></span>
+    <span class="badge"><a href="/api/poll" target="_blank">Manual Poll</a></span>
+  </div>
+
+  <div class="cloud-scheduler-info">
+    <strong>Cloud Scheduler Integration</strong><br>
+    This app uses Google Cloud Scheduler to trigger polling automatically every minute.<br>
+    Manual poll: <a href="/api/poll" target="_blank">Trigger Now</a>
   </div>
 
   <div class="chartwrap">
@@ -263,7 +271,8 @@ th { background: #f5f5f5; }
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@^1"></script>
 
 <script>
-const WINDOW_LIMIT = __WINDOW_LIMIT__;
+const WINDOW_LIMIT = ''' + str(PLOT_WINDOW_LIMIT) + ''';
+const RIGHT_PAD = 10;
 
 // ---------- Live table ----------
 async function refreshTable(){
@@ -288,18 +297,14 @@ async function refreshTable(){
 refreshTable();
 setInterval(refreshTable, 15000);
 
-// ---------- Combined congestion chart (dots + lines, last N points) ----------
-const RIGHT_PAD = 10; // how many empty "slots" to leave on the right
-
+// ---------- Combined congestion chart ----------
 let combinedChart;
 
 async function buildChart(){
   const res = await fetch('/api/all_history?limit=' + encodeURIComponent(WINDOW_LIMIT), { cache: 'no-store' });
-  const all = await res.json(); // { label: [[tsISO, cong, dur], ...], ... }
+  const all = await res.json();
 
   const labels = Object.keys(all).sort();
-
-  // Build index-based points: x = 1..N, y = congestion
   const datasets = labels.map((label, i) => {
     const raw = (all[label] || []).filter(p => p && p[1] != null);
     const points = raw.map((p, idx) => ({ x: idx + 1, y: p[1] }));
@@ -319,10 +324,9 @@ async function buildChart(){
     };
   });
 
-  // --- Sliding window calc ---
   const lastX = datasets.reduce((m, d) => Math.max(m, d.data.length), 0);
-  const xMax  = lastX + RIGHT_PAD;                 // leave space on the right
-  const xMin  = Math.max(1, xMax - WINDOW_LIMIT + 1); // show only the last WINDOW_LIMIT points
+  const xMax  = lastX + RIGHT_PAD;
+  const xMin  = Math.max(1, xMax - WINDOW_LIMIT + 1);
 
   if (combinedChart) combinedChart.destroy();
   const ctx = document.getElementById('combined').getContext('2d');
@@ -331,7 +335,7 @@ async function buildChart(){
     data: { datasets },
     options: {
       responsive: true,
-      maintainAspectRatio: false,   // make sure canvas has CSS height set
+      maintainAspectRatio: false,
       parsing: false,
       animation: false,
       interaction: { mode: 'nearest', intersect: false },
@@ -350,7 +354,7 @@ async function buildChart(){
           type: 'linear',
           min: xMin,
           max: xMax,
-          title: { display: true, text: `Latest ${WINDOW_LIMIT} points (padded)` },
+          title: { display: true, text: `Latest ${WINDOW_LIMIT} points` },
           ticks: { autoSkip: true }
         },
         y: {
@@ -369,9 +373,6 @@ setInterval(buildChart, 30000);
 </body>
 </html>
 '''
-    # Avoid str.format(); replace simple tokens safely
-    html = html.replace("__INTERVAL__", str(POLL_INTERVAL_SEC))
-    html = html.replace("__WINDOW_LIMIT__", str(PLOT_WINDOW_LIMIT))
     return Response(html, mimetype="text/html")
 
 # ----------------------------
@@ -399,7 +400,7 @@ def api_all_history():
     limit = int(request.args.get("limit", "150"))
     out = {}
     for label, series in history_cache.items():
-        out[label] = series[-limit:]   # last N points only (hide old data)
+        out[label] = series[-limit:]
     return jsonify(out)
 
 @app.route("/export.csv")
@@ -416,28 +417,20 @@ def api_health():
         "last_poll_at": last_poll_at,
         "last_poll_error": last_poll_error,
         "rows_written_total": rows_written_total,
-        "poll_interval_sec": POLL_INTERVAL_SEC,
-        "csv_path": CSV_PATH,
-        "compact_wide_path": COMPACT_WIDE_PATH,
-        "labels": [c["label"] for c in corridors]
+        "corridors_monitored": len(corridors),
+        "service_url": "https://yerevantrafficmonitor-578058838716.europe-west1.run.app"
     })
 
 # ----------------------------
-# Lifecycle
+# Main
 # ----------------------------
-def handle_sigterm(signum, frame):
-    stop_event.set()
-
-signal.signal(signal.SIGTERM, handle_sigterm)
-signal.signal(signal.SIGINT, handle_sigterm)
-
 if __name__ == "__main__":
-    t = threading.Thread(target=poll_loop, daemon=True)
-    t.start()
-    try:
-        # Poll once at startup so the page & chart have data immediately
-        poll_once()
-        app.run(host=HOST, port=PORT)
-    finally:
-        stop_event.set()
-        t.join(timeout=5)
+    print(f"Starting Yerevan Traffic Monitor")
+    print(f"Monitoring {len(corridors)} corridors")
+    
+    # Initial poll at startup
+    poll_once()
+    
+    print(f"Starting web server on {HOST}:{PORT}")
+    app.run(host=HOST, port=PORT, debug=False)
+    
