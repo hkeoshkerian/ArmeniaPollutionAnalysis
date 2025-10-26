@@ -21,7 +21,29 @@ CSV_FILENAME = "air_quality_data.csv"
 AIR_QUALITY_URL = "https://airquality.googleapis.com/v1/currentConditions:lookup"
 API_KEY = os.getenv("GOOGLE_AIR_QUALITY_API_KEY")
 
-# Multiple Yerevan Locations
+# Geolocations of all the 73 Clarity sensors 
+def load_monitoring_locations():
+    try:
+        with open("monitoring_locations.json", "r", encoding="utf-8") as f:
+            locations = json.load(f)
+        print(f"Loaded {len(locations)} monitoring locations from JSON")
+        return locations
+    except FileNotFoundError:
+        print("monitoring_locations.json not found. Using default locations.")
+        # Fallback to original locations if JSON doesn't exist
+        return [
+            {
+                "label": "Yerevan_Center",
+                "latitude": 40.1814,
+                "longitude": 44.5146,
+                "description": "Yerevan City Center - Republic Square"
+            }
+        ]
+
+MONITORING_LOCATIONS = load_monitoring_locations()
+
+# old monitoring stations 
+'''
 MONITORING_LOCATIONS = [
     {
         "label": "Yerevan_Center",
@@ -66,6 +88,7 @@ MONITORING_LOCATIONS = [
         "description": "Yerevan Southwest - Malatia"
     }
 ]
+'''
 
 app = Flask(__name__)
 

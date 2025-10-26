@@ -1,0 +1,586 @@
+[
+  {
+    "label": "Station_41",
+    "latitude": 40.218822,
+    "longitude": 44.576525,
+    "description": "1/4 Alma-Ata street, Yerevan, Armenia",
+    "external_id": "DACWA9824",
+    "district": "avan"
+  },
+  {
+    "label": "Station_42",
+    "latitude": 40.203692,
+    "longitude": 44.540715,
+    "description": "13/1 Dro street, Yerevan, Armenia",
+    "external_id": "DADDF8497",
+    "district": "kanaker-zeytun"
+  },
+  {
+    "label": "Station_43",
+    "latitude": 40.182333,
+    "longitude": 44.480884,
+    "description": "3 Tsitsernakaberd street, Yerevan, Armenia",
+    "external_id": "DBJGM2682",
+    "district": "malatia-sebastia"
+  },
+  {
+    "label": "Station_44",
+    "latitude": 40.177851,
+    "longitude": 44.542843,
+    "description": "82/5 Aytsemnik Urartu street, Yerevan, Armenia",
+    "external_id": "DCBEG1774",
+    "district": "nork-marash"
+  },
+  {
+    "label": "Station_45",
+    "latitude": 40.197623,
+    "longitude": 44.556469,
+    "description": "24 Nansen street, Yerevan, Armenia",
+    "external_id": "DCIKP1594",
+    "district": "nor-nork"
+  },
+  {
+    "label": "Station_46",
+    "latitude": 40.189063,
+    "longitude": 44.472001,
+    "description": "23/18 Leningradyan street, Yerevan, Armenia",
+    "external_id": "DCJGV0900",
+    "district": "malatia-sebastia"
+  },
+  {
+    "label": "Station_47",
+    "latitude": 40.21069,
+    "longitude": 44.513995,
+    "description": "17 Griboyedov street, Yerevan, Armenia",
+    "external_id": "DDBZY8999",
+    "district": "arabkir"
+  },
+  {
+    "label": "Station_48",
+    "latitude": 40.144987,
+    "longitude": 44.496617,
+    "description": "192 Arshakunyats street, Yerevan, Armenia",
+    "external_id": "DDGDP6324",
+    "district": "shengavit"
+  },
+  {
+    "label": "Station_49",
+    "latitude": 40.196105,
+    "longitude": 44.50853,
+    "description": "5 E.Mirzoyan street, Yerevan, Armenia",
+    "external_id": "DDGDZ7324",
+    "district": "kentron"
+  },
+  {
+    "label": "Station_50",
+    "latitude": 40.193658,
+    "longitude": 44.447,
+    "description": "37/47 Lukashin street, Yerevan, Armenia",
+    "external_id": "DDKAS9056",
+    "district": "ajapnyak"
+  },
+  {
+    "label": "Station_51",
+    "latitude": 40.19745,
+    "longitude": 44.557409,
+    "description": "24 Nansen street, Yerevan, Armenia",
+    "external_id": "DDUGL5981",
+    "district": "nor-nork"
+  },
+  {
+    "label": "Station_52",
+    "latitude": 40.200003,
+    "longitude": 44.536476,
+    "description": "25 D.Anhaght street, Yerevan, Armenia",
+    "external_id": "DEEWK1417",
+    "district": "kanaker-zeytun"
+  },
+  {
+    "label": "Station_53",
+    "latitude": 40.197576,
+    "longitude": 44.511123,
+    "description": "136/2 Verin antarayin street, Yerevan, Armenia",
+    "external_id": "DERNX1436",
+    "district": "kentron"
+  },
+  {
+    "label": "Station_54",
+    "latitude": 40.18257,
+    "longitude": 44.481232,
+    "description": "4 Tsitsernakaberd street, Yerevan, Armenia",
+    "external_id": "DETFB5758",
+    "district": "malatia-sebastia"
+  },
+  {
+    "label": "Station_55",
+    "latitude": 40.196353,
+    "longitude": 44.507888,
+    "description": "5 E.Mirzoyan street, Yerevan, Armenia",
+    "external_id": "DGIJE1070",
+    "district": "kentron"
+  },
+  {
+    "label": "Station_56",
+    "latitude": 40.219206,
+    "longitude": 44.486441,
+    "description": "61 Davtashen 1-st street, Yerevan, Armenia",
+    "external_id": "DGXRI2364",
+    "district": "davtashen"
+  },
+  {
+    "label": "Station_57",
+    "latitude": 40.220139,
+    "longitude": 44.48396,
+    "description": "15/5 Davtashen 10-th street, Yerevan, Armenia",
+    "external_id": "DHBVD3360",
+    "district": "davtashen"
+  },
+  {
+    "label": "Station_58",
+    "latitude": 40.205293,
+    "longitude": 44.544327,
+    "description": "22 Dro street, Yerevan, Armenia",
+    "external_id": "DHXDH8620",
+    "district": "kanaker-zeytun"
+  },
+  {
+    "label": "Station_59",
+    "latitude": 40.219126,
+    "longitude": 44.485678,
+    "description": "61 Davtashen 1-st street, Yerevan, Armenia",
+    "external_id": "DIDDH8878",
+    "district": "davtashen"
+  },
+  {
+    "label": "Station_60",
+    "latitude": 40.203171,
+    "longitude": 44.541504,
+    "description": "13/1 Dro street, Yerevan, Armenia",
+    "external_id": "DIWGN3527",
+    "district": "kanaker-zeytun"
+  },
+  {
+    "label": "Station_61",
+    "latitude": 40.201274,
+    "longitude": 44.515686,
+    "description": "21 S.Grigoryan street, Yerevan, Armenia",
+    "external_id": "DJBDR9588",
+    "district": "arabkir"
+  },
+  {
+    "label": "Station_62",
+    "latitude": 40.19401,
+    "longitude": 44.446711,
+    "description": "37/47 Lukashin street, Yerevan, Armenia",
+    "external_id": "DJZDY4081",
+    "district": "ajapnyak"
+  },
+  {
+    "label": "Station_63",
+    "latitude": 40.201072,
+    "longitude": 44.515867,
+    "description": "21 S.Grigoryan street, Yerevan, Armenia",
+    "external_id": "DKBFQ1957",
+    "district": "arabkir"
+  },
+  {
+    "label": "Station_65",
+    "latitude": 40.20648,
+    "longitude": 44.552813,
+    "description": "27/16 Rubinyants street, Yerevan, Armenia",
+    "external_id": "DMHSU5577",
+    "district": "kanaker-zeytun"
+  },
+  {
+    "label": "Station_66",
+    "latitude": 40.19469,
+    "longitude": 44.509668,
+    "description": "12 G.Emin street, Yerevan, Armenia",
+    "external_id": "DMZDT9732",
+    "district": "kentron"
+  },
+  {
+    "label": "Station_67",
+    "latitude": 40.194414,
+    "longitude": 44.509602,
+    "description": "12 G.Emin street, Yerevan, Armenia",
+    "external_id": "DNHWJ9492",
+    "district": "kentron"
+  },
+  {
+    "label": "Station_68",
+    "latitude": 40.221115,
+    "longitude": 44.484391,
+    "description": "15/5 Davtashen 10-th street, Yerevan, Armenia",
+    "external_id": "DNNKY6129",
+    "district": "davtashen"
+  },
+  {
+    "label": "Station_69",
+    "latitude": 40.180954,
+    "longitude": 44.513608,
+    "description": "32 Aram street, Yerevan, Armenia",
+    "external_id": "DPHGS0528",
+    "district": "kentron"
+  },
+  {
+    "label": "Station_70",
+    "latitude": 40.151925,
+    "longitude": 44.486616,
+    "description": "15/1 Nzhdeh street, Yerevan, Armenia",
+    "external_id": "DPRZF2958",
+    "district": "shengavit"
+  },
+  {
+    "label": "Station_71",
+    "latitude": 40.157701,
+    "longitude": 44.46107,
+    "description": "22/1 Isakov street, Yerevan, Armenia",
+    "external_id": "DQHQF5746",
+    "district": "malatia-sebastia"
+  },
+  {
+    "label": "Station_72",
+    "latitude": 40.205636,
+    "longitude": 44.544678,
+    "description": "22 Dro street, Yerevan, Armenia",
+    "external_id": "DQRWI9606",
+    "district": "kanaker-zeytun"
+  },
+  {
+    "label": "Station_73",
+    "latitude": 40.181398,
+    "longitude": 44.480768,
+    "description": "2 Tsitsernakaberd street, Yerevan, Armenia",
+    "external_id": "DQXAQ6339",
+    "district": "malatia-sebastia"
+  },
+  {
+    "label": "Station_74",
+    "latitude": 40.14486,
+    "longitude": 44.497045,
+    "description": "192 Arshakunyats street, Yerevan, Armenia",
+    "external_id": "DRCFM5700",
+    "district": "shengavit"
+  },
+  {
+    "label": "Station_75",
+    "latitude": 40.202882,
+    "longitude": 44.533607,
+    "description": "45/1 Ulnetsi street, Yerevan, Armenia",
+    "external_id": "DRYZY9931",
+    "district": "kanaker-zeytun"
+  },
+  {
+    "label": "Station_76",
+    "latitude": 40.18123,
+    "longitude": 44.513889,
+    "description": "32 Aram street, Yerevan, Armenia",
+    "external_id": "DTKWP1685",
+    "district": "kentron"
+  },
+  {
+    "label": "Station_77",
+    "latitude": 40.200325,
+    "longitude": 44.536883,
+    "description": "25 D.Anhaght street, Yerevan, Armenia",
+    "external_id": "DTMAJ8003",
+    "district": "kanaker-zeytun"
+  },
+  {
+    "label": "Station_78",
+    "latitude": 40.181915,
+    "longitude": 44.481152,
+    "description": "1 Tsitsernakaberd street, Yerevan, Armenia",
+    "external_id": "DTWVL0717",
+    "district": "malatia-sebastia"
+  },
+  {
+    "label": "Station_79",
+    "latitude": 40.109148,
+    "longitude": 44.471665,
+    "description": "101/2 Artashat street, Yerevan, Armenia",
+    "external_id": "DTYQT4045",
+    "district": "noragavit"
+  },
+  {
+    "label": "Station_80",
+    "latitude": 40.157646,
+    "longitude": 44.504469,
+    "description": "27/3 Arshakunyats street, Yerevan, Armenia",
+    "external_id": "DUHPI8625",
+    "district": "shengavit"
+  },
+  {
+    "label": "Station_81",
+    "latitude": 40.189605,
+    "longitude": 44.471517,
+    "description": "23/18 Leningradyan street, Yerevan, Armenia",
+    "external_id": "DUPKV6193",
+    "district": "malatia-sebastia"
+  },
+  {
+    "label": "Station_82",
+    "latitude": 40.157959,
+    "longitude": 44.504909,
+    "description": "27/3 Arshakunyats street, Yerevan, Armenia",
+    "external_id": "DVBEJ8996",
+    "district": "shengavit"
+  },
+  {
+    "label": "Station_83",
+    "latitude": 40.198153,
+    "longitude": 44.509898,
+    "description": "136/2 Verin antarayin street, Yerevan, Armenia",
+    "external_id": "DVJBD7236",
+    "district": "kentron"
+  },
+  {
+    "label": "Station_84",
+    "latitude": 40.19189,
+    "longitude": 44.542738,
+    "description": "19 Nork street, Yerevan, Armenia",
+    "external_id": "DVNPH2193",
+    "district": "nork-marash"
+  },
+  {
+    "label": "Station_85",
+    "latitude": 40.219185,
+    "longitude": 44.575643,
+    "description": "1/4 Alma-Ata street, Yerevan, Armenia",
+    "external_id": "DVWCH7779",
+    "district": "avan"
+  },
+  {
+    "label": "Station_86",
+    "latitude": 40.151826,
+    "longitude": 44.485872,
+    "description": "15/1 Nzhdeh street, Yerevan, Armenia",
+    "external_id": "DWHYR4927",
+    "district": "shengavit"
+  },
+  {
+    "label": "Station_87",
+    "latitude": 40.177916,
+    "longitude": 44.543395,
+    "description": "82/5 Aytsemnik Urartu street, Yerevan, Armenia",
+    "external_id": "DWVEY0910",
+    "district": "nork-marash"
+  },
+  {
+    "label": "Station_88",
+    "latitude": 40.108538,
+    "longitude": 44.470834,
+    "description": "101/2 Artashat street, Yerevan, Armenia",
+    "external_id": "DWXDC2269",
+    "district": "noragavit"
+  },
+  {
+    "label": "Station_89",
+    "latitude": 40.157575,
+    "longitude": 44.459894,
+    "description": "22/1 Isakov street, Yerevan, Armenia",
+    "external_id": "DXZFS6100",
+    "district": "malatia-sebastia"
+  },
+  {
+    "label": "Station_90",
+    "latitude": 40.211421,
+    "longitude": 44.512735,
+    "description": "17 Griboyedov street, Yerevan, Armenia",
+    "external_id": "DYTXC0986",
+    "district": "arabkir"
+  },
+  {
+    "label": "Station_91",
+    "latitude": 40.202509,
+    "longitude": 44.533042,
+    "description": "45/1 Ulnetsi street, Yerevan, Armenia",
+    "external_id": "DZXUU3538",
+    "district": "kanaker-zeytun"
+  },
+  {
+    "label": "Station_270",
+    "latitude": 40.1926,
+    "longitude": 44.56238,
+    "description": "Magas",
+    "external_id": "DAQTQ5862",
+    "district": "nor-nork"
+  },
+  {
+    "label": "Station_271",
+    "latitude": 40.217109,
+    "longitude": 44.494424,
+    "description": "Yeghvard Hwy",
+    "external_id": "DCYBL6171",
+    "district": "davtashen"
+  },
+  {
+    "label": "Station_272",
+    "latitude": 40.212904,
+    "longitude": 44.512271,
+    "description": "Armstory",
+    "external_id": "DCZEG8644",
+    "district": "arabkir"
+  },
+  {
+    "label": "Station_273",
+    "latitude": 40.166857,
+    "longitude": 44.44647,
+    "description": "Arm construct",
+    "external_id": "DDZLB1609",
+    "district": "malatia-sebastia"
+  },
+  {
+    "label": "Station_274",
+    "latitude": 40.217598,
+    "longitude": 44.494874,
+    "description": "Yeghvard Hwy",
+    "external_id": "DFZDS8491",
+    "district": "davtashen"
+  },
+  {
+    "label": "Station_275",
+    "latitude": 40.183089,
+    "longitude": 44.536401,
+    "description": "Technotun",
+    "external_id": "DIMLF2308",
+    "district": "nork-marash"
+  },
+  {
+    "label": "Station_276",
+    "latitude": 40.21345,
+    "longitude": 44.511689,
+    "description": "Armstory",
+    "external_id": "DISWI5141",
+    "district": "arabkir"
+  },
+  {
+    "label": "Station_277",
+    "latitude": 40.23007,
+    "longitude": 44.556424,
+    "description": "Hrach ev Ruben",
+    "external_id": "DIWVR7506",
+    "district": "avan"
+  },
+  {
+    "label": "Station_278",
+    "latitude": 40.225458,
+    "longitude": 44.506152,
+    "description": "Yeghvard Hwy",
+    "external_id": "DJCYX4080",
+    "district": "davtashen"
+  },
+  {
+    "label": "Station_279",
+    "latitude": 40.194102,
+    "longitude": 44.508729,
+    "description": "Harutyun Margaryan",
+    "external_id": "DJEHP7348",
+    "district": "kentron"
+  },
+  {
+    "label": "Station_280",
+    "latitude": 40.219682,
+    "longitude": 44.496958,
+    "description": "Pars",
+    "external_id": "DKZZE2240",
+    "district": "davtashen"
+  },
+  {
+    "label": "Station_281",
+    "latitude": 40.224853,
+    "longitude": 44.506273,
+    "description": "Yeghvard Hwy",
+    "external_id": "DMPCV1759",
+    "district": "davtashen"
+  },
+  {
+    "label": "Station_282",
+    "latitude": 40.220032,
+    "longitude": 44.496169,
+    "description": " Pirumyanshin",
+    "external_id": "DNLGJ0451",
+    "district": "davtashen"
+  },
+  {
+    "label": "Station_283",
+    "latitude": 40.227693,
+    "longitude": 44.50321,
+    "description": "Pavilion",
+    "external_id": "DXUYC8213",
+    "district": "davtashen"
+  },
+  {
+    "label": "Station_284",
+    "latitude": 40.228586,
+    "longitude": 44.504157,
+    "description": "Pavilion",
+    "external_id": "DYPCQ7947",
+    "district": "davtashen"
+  },
+  {
+    "label": "Station_285",
+    "latitude": 40.227134,
+    "longitude": 44.498699,
+    "description": "Crowd effort development",
+    "external_id": "DZNGH2624",
+    "district": "davtashen"
+  },
+  {
+    "label": "Station_286",
+    "latitude": 40.19533,
+    "longitude": 44.512448,
+    "description": "Park residence",
+    "external_id": "DZUYW6771",
+    "district": "kentron"
+  },
+  {
+    "label": "Station_411",
+    "latitude": 40.192033,
+    "longitude": 44.543061,
+    "description": "19 Nork street, Yerevan, Armenia, Norq Marash",
+    "external_id": "DETFG0062",
+    "district": "nork-marash"
+  },
+  {
+    "label": "Station_412",
+    "latitude": 40.165955,
+    "longitude": 44.505023,
+    "description": "Byuregh, Kentron, Armenia",
+    "external_id": "DZUKQ8316",
+    "district": "kentron"
+  },
+  {
+    "label": "Station_413",
+    "latitude": 40.168029,
+    "longitude": 44.485432,
+    "description": "Isakov, Malatia-Sebastia, Armenia",
+    "external_id": "DJXMC9627",
+    "district": "malatia-sebastia"
+  },
+  {
+    "label": "Station_414",
+    "latitude": 40.136924,
+    "longitude": 44.489913,
+    "description": "Arshakunyats, Shengavit, Armenia",
+    "external_id": "DLYNJ8102",
+    "district": "shengavit"
+  },
+  {
+    "label": "Station_415",
+    "latitude": 40.161352,
+    "longitude": 44.512605,
+    "description": "Tigran Mets, Erebuni, Armenia",
+    "external_id": "DBDKX4382",
+    "district": "erebuni"
+  },
+  {
+    "label": "Station_417",
+    "latitude": 40.171799,
+    "longitude": 44.508417,
+    "description": "Circus, Kentron, Armenia",
+    "external_id": "DSFKF4456",
+    "district": "kentron"
+  }
+]
