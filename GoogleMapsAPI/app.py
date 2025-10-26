@@ -282,15 +282,17 @@ th { background: #f5f5f5; }
 #combined { width: 100%; height: 400px; }
 .cloud-scheduler-info { background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 1rem 0; }
 .gcs-info { background: #e8f0f5; padding: 15px; border-radius: 5px; margin: 1rem 0; }
-.legend-controls { background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 1rem 0; max-height: 200px; overflow-y: auto; border: 1px solid #ddd; }
-.legend-buttons { margin-bottom: 10px; }
-.legend-btn { padding: 5px 10px; margin-right: 5px; background: #007cba; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px; }
+.legend-controls { background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 1rem 0; max-height: 300px; overflow-y: auto; border: 1px solid #ddd; }
+.legend-buttons { margin-bottom: 15px; position: sticky; top: 0; background: #f9f9f9; padding: 10px 0; z-index: 10; }
+.legend-btn { padding: 8px 12px; margin-right: 8px; background: #007cba; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
 .legend-btn:hover { background: #005a87; }
-.legend-checkboxes { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 5px; }
-.legend-item { display: flex; align-items: center; margin-bottom: 3px; }
-.legend-item input { margin-right: 8px; }
-.legend-item label { font-size: 12px; cursor: pointer; }
-.legend-color { display: inline-block; width: 12px; height: 12px; margin-right: 5px; border-radius: 2px; }
+.legend-checkboxes { display: flex; flex-direction: column; gap: 4px; }
+.legend-item { display: flex; align-items: center; padding: 4px 8px; border-radius: 3px; }
+.legend-item:hover { background: #f0f0f0; }
+.legend-item input { margin-right: 10px; flex-shrink: 0; }
+.legend-color { display: inline-block; width: 16px; height: 16px; margin-right: 10px; border-radius: 3px; border: 1px solid #ddd; flex-shrink: 0; }
+.legend-label { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.route-count { margin-left: 10px; color: #666; font-size: 11px; }
 </style>
 </head>
 <body>
@@ -323,8 +325,9 @@ th { background: #f5f5f5; }
       <strong>Route Controls:</strong>
       <button class="legend-btn" onclick="showAllRoutes()">Show All</button>
       <button class="legend-btn" onclick="hideAllRoutes()">Hide All</button>
-      <button class="legend-btn" onclick="showOnlyAB()">Show Only AB (Forward)</button>
-      <button class="legend-btn" onclick="showOnlyBA()">Show Only BA (Return)</button>
+      <button class="legend-btn" onclick="showOnlyAB()">Show Only AB</button>
+      <button class="legend-btn" onclick="showOnlyBA()">Show Only BA</button>
+      <span class="route-count" id="routeCount">0 routes visible</span>
     </div>
     <div class="legend-checkboxes" id="routeCheckboxes">
       <!-- Checkboxes will be populated by JavaScript -->
@@ -359,21 +362,37 @@ let allRoutesData = {};
 let routeColors = {};
 
 // ---------- Route Control Functions ----------
+function updateRouteCount() {
+  if (combinedChart) {
+    const visibleCount = combinedChart.data.datasets.filter((ds, index) => {
+      const meta = combinedChart.getDatasetMeta(index);
+      return !meta.hidden;
+    }).length;
+    document.getElementById('routeCount').textContent = `${visibleCount} routes visible`;
+  }
+}
+
 function populateRouteCheckboxes() {
   const container = document.getElementById('routeCheckboxes');
   container.innerHTML = '';
   
   Object.keys(allRoutesData).sort().forEach(route => {
     const color = routeColors[route] || '#cccccc';
+    const isChecked = combinedChart ? !combinedChart.getDatasetMeta(
+      combinedChart.data.datasets.findIndex(ds => ds.label === route)
+    )?.hidden : true;
+    
     const div = document.createElement('div');
     div.className = 'legend-item';
     div.innerHTML = `
-      <input type="checkbox" id="route_${route}" value="${route}" checked onchange="toggleRoute('${route}')">
+      <input type="checkbox" id="route_${route}" value="${route}" ${isChecked ? 'checked' : ''} onchange="toggleRoute('${route}')">
       <span class="legend-color" style="background-color: ${color};"></span>
-      <label for="route_${route}">${route}</label>
+      <label for="route_${route}" class="legend-label" title="${route}">${route}</label>
     `;
     container.appendChild(div);
   });
+  
+  updateRouteCount();
 }
 
 function toggleRoute(route) {
@@ -383,6 +402,7 @@ function toggleRoute(route) {
       const meta = combinedChart.getDatasetMeta(index);
       meta.hidden = !meta.hidden;
       combinedChart.update();
+      updateRouteCount();
     }
   }
 }
@@ -394,11 +414,7 @@ function showAllRoutes() {
       meta.hidden = false;
     });
     combinedChart.update();
-    
-    // Update checkboxes
-    document.querySelectorAll('.legend-item input').forEach(checkbox => {
-      checkbox.checked = true;
-    });
+    populateRouteCheckboxes();
   }
 }
 
@@ -409,11 +425,7 @@ function hideAllRoutes() {
       meta.hidden = true;
     });
     combinedChart.update();
-    
-    // Update checkboxes
-    document.querySelectorAll('.legend-item input').forEach(checkbox => {
-      checkbox.checked = false;
-    });
+    populateRouteCheckboxes();
   }
 }
 
@@ -424,12 +436,7 @@ function showOnlyAB() {
       meta.hidden = !dataset.label.endsWith('_AB');
     });
     combinedChart.update();
-    
-    // Update checkboxes
-    document.querySelectorAll('.legend-item input').forEach(checkbox => {
-      const route = checkbox.value;
-      checkbox.checked = route.endsWith('_AB');
-    });
+    populateRouteCheckboxes();
   }
 }
 
@@ -440,12 +447,7 @@ function showOnlyBA() {
       meta.hidden = !dataset.label.endsWith('_BA');
     });
     combinedChart.update();
-    
-    // Update checkboxes
-    document.querySelectorAll('.legend-item input').forEach(checkbox => {
-      const route = checkbox.value;
-      checkbox.checked = route.endsWith('_BA');
-    });
+    populateRouteCheckboxes();
   }
 }
 
@@ -498,7 +500,7 @@ async function buildChart(){
       interaction: { mode: 'nearest', intersect: false },
       plugins: {
         legend: { 
-          display: false // Hide the default legend since we have our custom controls
+          display: false
         },
         tooltip: {
           callbacks: {
@@ -530,7 +532,6 @@ async function buildChart(){
     }
   });
 
-  // Populate the route checkboxes after chart is created
   populateRouteCheckboxes();
   refreshTable();
 }
