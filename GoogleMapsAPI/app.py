@@ -14,7 +14,7 @@ COMPACT_WIDE_PATH = os.getenv("COMPACT_WIDE_PATH", "traffic_compact_wide.csv")  
 CORRIDORS_JSON = os.getenv("CORRIDORS_JSON", "corridors.json")
 PLOT_WINDOW_LIMIT = int(os.getenv("PLOT_WINDOW_LIMIT", "150"))           # how many recent points to show on the chart
 HOST = os.getenv("HOST", "0.0.0.0")
-PORT = int(os.getenv("PORT", "8000"))
+PORT = int(os.getenv("PORT", "8080"))
 
 ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
 FIELD_MASK = "routes.duration,routes.distanceMeters,routes.staticDuration,routes.travelAdvisory"
