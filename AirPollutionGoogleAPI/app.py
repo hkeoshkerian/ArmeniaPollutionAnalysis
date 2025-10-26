@@ -95,9 +95,9 @@ app = Flask(__name__)
 # Pollutant mapping
 POLLUTANT_INFO = {
     'CO': {'name': 'Carbon Monoxide', 'units': 'ppb', 'column_suffix': 'ppb'},
-    'NO2': {'name': 'Nitrogen Dioxide', 'units': 'μg/m³', 'column_suffix': 'ugm3'},
-    'O3': {'name': 'Ozone', 'units': 'μg/m³', 'column_suffix': 'ugm3'},
-    'SO2': {'name': 'Sulfur Dioxide', 'units': 'μg/m³', 'column_suffix': 'ugm3'},
+    'NO2': {'name': 'Nitrogen Dioxide', 'units': 'μg/m³', 'column_suffix': 'ppb'},
+    'O3': {'name': 'Ozone', 'units': 'μg/m³', 'column_suffix': 'ppb'},
+    'SO2': {'name': 'Sulfur Dioxide', 'units': 'μg/m³', 'column_suffix': 'ppb'},
     'PM25': {'name': 'PM2.5', 'units': 'μg/m³', 'column_suffix': 'ugm3'},
     'PM10': {'name': 'PM10', 'units': 'μg/m³', 'column_suffix': 'ugm3'}
 }
@@ -105,7 +105,7 @@ POLLUTANT_INFO = {
 # CSV headers
 CSV_HEADER = [
     "timestamp_utc", "location_label", "latitude", "longitude", "description",
-    "overall_aqi", "CO_ppb", "NO2_ugm3", "O3_ugm3", "SO2_ugm3", "PM25_ugm3", "PM10_ugm3"
+    "overall_aqi", "CO_ppb", "NO2_ppb", "O3_ppb", "SO2_ppb", "PM25_ugm3", "PM10_ugm3"
 ]
 
 # Cloud Storage Functions
@@ -398,10 +398,10 @@ function formatLocationData(locationData) {
                         <td class="${locationData.overall_aqi ? getAQIClass(locationData.overall_aqi) : ''}">${locationData.overall_aqi || 'N/A'}</td>             
                         <td>${locationData.PM25_ugm3 || 'N/A'}</td>
                         <td>${locationData.PM10_ugm3 || 'N/A'}</td>
-                        <td>${locationData.NO2_ugm3 || 'N/A'}</td>
-                        <td>${locationData.O3_ugm3 || 'N/A'}</td>
+                        <td>${locationData.NO2_ppb || 'N/A'}</td>
+                        <td>${locationData.O3_ppb || 'N/A'}</td>
                         <td>${locationData.CO_ppb || 'N/A'}</td>
-                        <td>${locationData.SO2_ugm3 || 'N/A'}</td>
+                        <td>${locationData.SO2_ppb || 'N/A'}</td>
                     </tr>
                 </tbody>
             </table>
