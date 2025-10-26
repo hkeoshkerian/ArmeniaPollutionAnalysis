@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any
 import requests
 from flask import Flask, jsonify, send_file, Response
+from google.cloud import storage
 
 # ----------------------------
 # Config
@@ -14,15 +15,42 @@ PLOT_WINDOW_LIMIT = int(os.getenv("PLOT_WINDOW_LIMIT", "150"))
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8080"))
 
+# GCS Configuration
+GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "yerevan-traffic-data")
+GCS_CSV_PATH = os.getenv("GCS_CSV_PATH", "traffic_observations.csv")
+GCS_CORRIDORS_PATH = os.getenv("GCS_CORRIDORS_PATH", "corridors.json")
+USE_GCS = os.getenv("USE_GCS", "false").lower() == "true"
+
 ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
 FIELD_MASK = "routes.duration,routes.distanceMeters,routes.staticDuration,routes.travelAdvisory"
 
 app = Flask(__name__)
 
+# Initialize GCS client
+gcs_client = None
+if USE_GCS:
+    try:
+        gcs_client = storage.Client()
+        print(f"GCS client initialized, bucket: {GCS_BUCKET_NAME}")
+    except Exception as e:
+        print(f"Warning: Failed to initialize GCS client: {e}")
+        gcs_client = None
+
 # ----------------------------
-# Load corridors
+# File operations with GCS support
 # ----------------------------
 def load_corridors() -> List[Dict[str, Any]]:
+    if USE_GCS and gcs_client:
+        try:
+            bucket = gcs_client.bucket(GCS_BUCKET_NAME)
+            blob = bucket.blob(GCS_CORRIDORS_PATH)
+            content = blob.download_as_string().decode('utf-8')
+            print(f"Loaded corridors from GCS: {GCS_BUCKET_NAME}/{GCS_CORRIDORS_PATH}")
+            return json.loads(content)
+        except Exception as e:
+            print(f"Failed to load corridors from GCS, falling back to local: {e}")
+    
+    # Fallback to local file
     with open(CORRIDORS_JSON, "r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -39,11 +67,67 @@ CSV_HEADER = [
 ]
 
 def ensure_long_csv():
+    if USE_GCS and gcs_client:
+        # For GCS, we don't need to create the file in advance
+        return
+        
     if not os.path.exists(CSV_PATH):
         with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(CSV_HEADER)
 
 ensure_long_csv()
+
+def append_to_csv(rows: List[Dict[str, Any]]):
+    """Append rows to CSV, both locally and to GCS if enabled"""
+    
+    # Local file append
+    with open(CSV_PATH, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=CSV_HEADER)
+        for row in rows:
+            w.writerow(row)
+    
+    # GCS append (download, append, upload)
+    if USE_GCS and gcs_client:
+        try:
+            bucket = gcs_client.bucket(GCS_BUCKET_NAME)
+            blob = bucket.blob(GCS_CSV_PATH)
+            
+            # Download existing content
+            try:
+                existing_content = blob.download_as_string().decode('utf-8')
+            except Exception:
+                # File doesn't exist yet, create with header
+                existing_content = ",".join(CSV_HEADER) + "\n"
+            
+            # Append new rows
+            output = existing_content
+            for row in rows:
+                output += ",".join(str(row.get(col, "")) for col in CSV_HEADER) + "\n"
+            
+            # Upload back to GCS
+            blob.upload_from_string(output, content_type='text/csv')
+            print(f"Appended {len(rows)} rows to GCS: {GCS_BUCKET_NAME}/{GCS_CSV_PATH}")
+            
+        except Exception as e:
+            print(f"Error updating GCS CSV: {e}")
+
+def download_csv_from_gcs() -> str:
+    """Download CSV from GCS to local file for serving"""
+    if USE_GCS and gcs_client:
+        try:
+            bucket = gcs_client.bucket(GCS_BUCKET_NAME)
+            blob = bucket.blob(GCS_CSV_PATH)
+            content = blob.download_as_string().decode('utf-8')
+            
+            # Write to local file for serving
+            with open(CSV_PATH, "w", encoding="utf-8") as f:
+                f.write(content)
+                
+            return CSV_PATH
+        except Exception as e:
+            print(f"Error downloading from GCS: {e}")
+    
+    return CSV_PATH
 
 # ----------------------------
 # In-memory caches
@@ -141,16 +225,18 @@ def poll_once():
     last_poll_at = ts
 
     if rows:
-        # Append long CSV
-        with open(CSV_PATH, "a", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=CSV_HEADER)
-            for row in rows:
-                w.writerow(row)
-                rows_written_total += 1
-                latest_cache[row["label"]] = row
-                history_cache.setdefault(row["label"], []).append(
-                    (row["timestamp_utc"], row["congestion_index"], row["duration_sec"])
-                )
+        # Use new append function that handles both local and GCS
+        append_to_csv(rows)
+        
+        for row in rows:
+            rows_written_total += 1
+            latest_cache[row["label"]] = row
+            
+            # Store with proper datetime for plotting
+            dt = datetime.fromisoformat(row["timestamp_utc"].replace('Z', '+00:00'))
+            history_cache.setdefault(row["label"], []).append(
+                (dt.isoformat(), row["congestion_index"], row["duration_sec"])
+            )
 
         last_poll_error = None
     
@@ -195,12 +281,14 @@ th { background: #f5f5f5; }
 .chartwrap { margin: 1.2rem 0; }
 #combined { width: 100%; height: 380px; }
 .cloud-scheduler-info { background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 1rem 0; }
+.gcs-info { background: #e8f0f5; padding: 15px; border-radius: 5px; margin: 1rem 0; }
 </style>
 </head>
 <body>
   <h1>Yerevan Traffic Monitor</h1>
   <div class="status">
     <span class="badge">Cloud Scheduler Powered</span>
+    <span class="badge">GCS Storage: ''' + ("Enabled" if USE_GCS else "Disabled") + '''</span>
     <span class="badge"><a href="/export.csv">Download long CSV</a></span>
     <span class="badge"><a href="/api/latest">Latest JSON</a></span>
     <span class="badge"><a href="/api/poll" target="_blank">Manual Poll</a></span>
@@ -208,8 +296,13 @@ th { background: #f5f5f5; }
 
   <div class="cloud-scheduler-info">
     <strong>Cloud Scheduler Integration</strong><br>
-    This app uses Google Cloud Scheduler to trigger polling automatically every 5 minutes.<br>
+    This app uses Google Cloud Scheduler to trigger polling automatically every minute.<br>
     Manual poll: <a href="/api/poll" target="_blank">Trigger Now</a>
+  </div>
+
+  <div class="gcs-info">
+    <strong>Google Cloud Storage: ''' + ("Enabled" if USE_GCS else "Disabled") + '''</strong><br>
+    ''' + (f"Bucket: {GCS_BUCKET_NAME}, CSV: {GCS_CSV_PATH}" if USE_GCS else "GCS is not enabled. Set USE_GCS=true to enable cloud storage.") + '''
   </div>
 
   <div class="chartwrap">
@@ -237,7 +330,7 @@ th { background: #f5f5f5; }
 
 <script>
 const WINDOW_LIMIT = ''' + str(PLOT_WINDOW_LIMIT) + ''';
-const RIGHT_PAD = 10;
+const RIGHT_PAD_MINUTES = 10;
 
 // ---------- Live table ----------
 async function refreshTable(){
@@ -262,7 +355,7 @@ async function refreshTable(){
 refreshTable();
 setInterval(refreshTable, 15000);
 
-// ---------- Combined congestion chart ----------
+// ---------- Combined congestion chart with proper timestamps ----------
 let combinedChart;
 
 async function buildChart(){
@@ -272,7 +365,12 @@ async function buildChart(){
   const labels = Object.keys(all).sort();
   const datasets = labels.map((label, i) => {
     const raw = (all[label] || []).filter(p => p && p[1] != null);
-    const points = raw.map((p, idx) => ({ x: idx + 1, y: p[1] }));
+    
+    // Convert to proper time-based data points
+    const points = raw.map(p => ({ 
+      x: luxon.DateTime.fromISO(p[0]).toMillis(), // Convert ISO timestamp to milliseconds
+      y: p[1] 
+    }));
 
     const hue = Math.floor(i * 360 / Math.max(1, labels.length));
     return {
@@ -285,13 +383,14 @@ async function buildChart(){
       borderWidth: 2,
       pointRadius: 3,
       pointHoverRadius: 5,
-      tension: 0
+      tension: 0.1
     };
   });
 
-  const lastX = datasets.reduce((m, d) => Math.max(m, d.data.length), 0);
-  const xMax  = lastX + RIGHT_PAD;
-  const xMin  = Math.max(1, xMax - WINDOW_LIMIT + 1);
+  // Calculate time window for x-axis
+  const now = luxon.DateTime.now().toMillis();
+  const xMax = now;
+  const xMin = now - (WINDOW_LIMIT * 60 * 1000); // Show last N minutes
 
   if (combinedChart) combinedChart.destroy();
   const ctx = document.getElementById('combined').getContext('2d');
@@ -309,21 +408,33 @@ async function buildChart(){
         legend: { position: 'bottom' },
         tooltip: {
           callbacks: {
-            title: items => `Point #${items[0]?.parsed?.x ?? ''}`,
+            title: function(items) {
+              if (items.length > 0) {
+                const timestamp = items[0].parsed.x;
+                return luxon.DateTime.fromMillis(timestamp).toLocaleString(luxon.DateTime.DATETIME_MED);
+              }
+              return '';
+            },
             label: item => `${item.dataset.label}: ${item.formattedValue}`
           }
         }
       },
       scales: {
         x: {
-          type: 'linear',
+          type: 'time',
+          time: {
+            unit: 'minute',
+            displayFormats: {
+              minute: 'HH:mm'
+            }
+          },
           min: xMin,
           max: xMax,
-          title: { display: true, text: `Latest ${WINDOW_LIMIT} points` },
-          ticks: { autoSkip: true }
+          title: { display: true, text: 'Time' },
+          ticks: { autoSkip: true, maxTicksLimit: 10 }
         },
         y: {
-          min: 0,
+          min: 0.5,
           max: 3,
           title: { display: true, text: 'Congestion Index (duration / static)' }
         }
@@ -370,6 +481,9 @@ def api_all_history():
 
 @app.route("/export.csv")
 def export_csv():
+    if USE_GCS and gcs_client:
+        # Ensure we have the latest from GCS
+        download_csv_from_gcs()
     return send_file(CSV_PATH, as_attachment=True, download_name="traffic_observations.csv")
 
 @app.route("/api/health")
@@ -379,6 +493,8 @@ def api_health():
         "last_poll_error": last_poll_error,
         "rows_written_total": rows_written_total,
         "corridors_monitored": len(corridors),
+        "gcs_enabled": USE_GCS,
+        "gcs_bucket": GCS_BUCKET_NAME if USE_GCS else None,
         "service_url": "https://yerevantrafficmonitor-578058838716.europe-west1.run.app"
     })
 
@@ -388,10 +504,12 @@ def api_health():
 if __name__ == "__main__":
     print(f"Starting Yerevan Traffic Monitor")
     print(f"Monitoring {len(corridors)} corridors")
+    print(f"GCS Storage: {'Enabled' if USE_GCS else 'Disabled'}")
+    if USE_GCS:
+        print(f"GCS Bucket: {GCS_BUCKET_NAME}")
     
     # Initial poll at startup
     poll_once()
     
     print(f"Starting web server on {HOST}:{PORT}")
     app.run(host=HOST, port=PORT, debug=False)
-    
