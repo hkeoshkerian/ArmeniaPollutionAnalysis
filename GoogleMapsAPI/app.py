@@ -9,7 +9,6 @@ from flask import Flask, jsonify, send_file, Response
 # Config
 # ----------------------------
 CSV_PATH = os.getenv("CSV_PATH", "traffic_observations.csv")
-COMPACT_WIDE_PATH = os.getenv("COMPACT_WIDE_PATH", "traffic_compact_wide.csv")
 CORRIDORS_JSON = os.getenv("CORRIDORS_JSON", "corridors.json")
 PLOT_WINDOW_LIMIT = int(os.getenv("PLOT_WINDOW_LIMIT", "150"))
 HOST = os.getenv("HOST", "0.0.0.0")
@@ -44,17 +43,7 @@ def ensure_long_csv():
         with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(CSV_HEADER)
 
-def _compact_wide_headers():
-    labels = [c["label"] for c in corridors]
-    return ["timestamp_utc"] + labels
-
-def ensure_compact_wide_csv():
-    if not os.path.exists(COMPACT_WIDE_PATH):
-        with open(COMPACT_WIDE_PATH, "w", newline="", encoding="utf-8") as f:
-            csv.writer(f).writerow(_compact_wide_headers())
-
 ensure_long_csv()
-ensure_compact_wide_csv()
 
 # ----------------------------
 # In-memory caches
@@ -80,27 +69,6 @@ def seconds_to_int(s: str):
         except:
             return None
     return None
-
-def write_compact_wide_row(ts_iso: str, rows: list):
-    labels = [c["label"] for c in corridors]
-    by_label = { r["label"]: r for r in rows }
-
-    def pack(r: Dict[str, Any]) -> str:
-        return json.dumps([
-            r.get("congestion_index", None),
-            r.get("duration_sec", None),
-            r.get("static_sec", None),
-            r.get("distance_m", None),
-        ], ensure_ascii=False)
-
-    cells = []
-    for lab in labels:
-        r = by_label.get(lab)
-        cells.append(pack(r) if r else "")
-
-    out = [ts_iso] + cells
-    with open(COMPACT_WIDE_PATH, "a", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow(out)
 
 # ----------------------------
 # Poller
@@ -184,8 +152,6 @@ def poll_once():
                     (row["timestamp_utc"], row["congestion_index"], row["duration_sec"])
                 )
 
-        # Append compact wide row
-        write_compact_wide_row(ts, rows)
         last_poll_error = None
     
     return {
@@ -236,7 +202,6 @@ th { background: #f5f5f5; }
   <div class="status">
     <span class="badge">Cloud Scheduler Powered</span>
     <span class="badge"><a href="/export.csv">Download long CSV</a></span>
-    <span class="badge"><a href="/export_compact_wide.csv">Download compact wide CSV</a></span>
     <span class="badge"><a href="/api/latest">Latest JSON</a></span>
     <span class="badge"><a href="/api/poll" target="_blank">Manual Poll</a></span>
   </div>
@@ -406,10 +371,6 @@ def api_all_history():
 @app.route("/export.csv")
 def export_csv():
     return send_file(CSV_PATH, as_attachment=True, download_name="traffic_observations.csv")
-
-@app.route("/export_compact_wide.csv")
-def export_compact_wide():
-    return send_file(COMPACT_WIDE_PATH, as_attachment=True, download_name="traffic_compact_wide.csv")
 
 @app.route("/api/health")
 def api_health():
