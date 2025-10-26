@@ -95,9 +95,9 @@ app = Flask(__name__)
 # Pollutant mapping
 POLLUTANT_INFO = {
     'CO': {'name': 'Carbon Monoxide', 'units': 'ppb', 'column_suffix': 'ppb'},
-    'NO2': {'name': 'Nitrogen Dioxide', 'units': 'μg/m³', 'column_suffix': 'ppb'},
-    'O3': {'name': 'Ozone', 'units': 'μg/m³', 'column_suffix': 'ppb'},
-    'SO2': {'name': 'Sulfur Dioxide', 'units': 'μg/m³', 'column_suffix': 'ppb'},
+    'NO2': {'name': 'Nitrogen Dioxide', 'units': 'ppb', 'column_suffix': 'ppb'},
+    'O3': {'name': 'Ozone', 'units': 'ppb', 'column_suffix': 'ppb'},
+    'SO2': {'name': 'Sulfur Dioxide', 'units': 'ppb', 'column_suffix': 'ppb'},
     'PM25': {'name': 'PM2.5', 'units': 'μg/m³', 'column_suffix': 'ugm3'},
     'PM10': {'name': 'PM10', 'units': 'μg/m³', 'column_suffix': 'ugm3'}
 }
@@ -387,10 +387,10 @@ function formatLocationData(locationData) {
                         <th>Overall AQI</th>           
                         <th>PM2.5 (μg/m³)</th>
                         <th>PM10 (μg/m³)</th>
-                        <th>NO2 (μg/m³)</th>
-                        <th>O3 (μg/m³)</th>
+                        <th>NO2 (ppb)</th>
+                        <th>O3 (ppb)</th>
                         <th>CO (ppb)</th>
-                        <th>SO2 (μg/m³)</th>
+                        <th>SO2 (ppb)</th>
                     </tr>
                 </thead>
                 <tbody>
