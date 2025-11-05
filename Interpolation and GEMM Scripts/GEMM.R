@@ -48,7 +48,7 @@ calculate_gemm_rr <- function(pm25, theta, alpha, mu, nu, cf = 2.4) {
 # GEMM(z)=exp{θlog(z/α+1)/(1+exp{-(z-µ)/ν})}, where z=max(0, PM2.5-2.4µg/m3
 
 
-baseline_rate <- 0.0005 / (365 * 24)
+baseline_rate <- (8.4/100000) / (365 * 24)
 
 # Resample PM2.5 only once
 pm25_resampled <- resample(pm25_stack, pop_raster, method = "bilinear")
