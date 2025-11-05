@@ -21,7 +21,29 @@ CSV_FILENAME = "air_quality_data.csv"
 AIR_QUALITY_URL = "https://airquality.googleapis.com/v1/currentConditions:lookup"
 API_KEY = os.getenv("GOOGLE_AIR_QUALITY_API_KEY")
 
-# Multiple Yerevan Locations
+# Geolocations of all the 73 Clarity sensors 
+def load_monitoring_locations():
+    try:
+        with open("monitoring_locations.json", "r", encoding="utf-8") as f:
+            locations = json.load(f)
+        print(f"Loaded {len(locations)} monitoring locations from JSON")
+        return locations
+    except FileNotFoundError:
+        print("monitoring_locations.json not found. Using default locations.")
+        # Fallback to original locations if JSON doesn't exist
+        return [
+            {
+                "label": "Yerevan_Center",
+                "latitude": 40.1814,
+                "longitude": 44.5146,
+                "description": "Yerevan City Center - Republic Square"
+            }
+        ]
+
+MONITORING_LOCATIONS = load_monitoring_locations()
+
+# old monitoring stations 
+'''
 MONITORING_LOCATIONS = [
     {
         "label": "Yerevan_Center",
@@ -66,15 +88,16 @@ MONITORING_LOCATIONS = [
         "description": "Yerevan Southwest - Malatia"
     }
 ]
+'''
 
 app = Flask(__name__)
 
 # Pollutant mapping
 POLLUTANT_INFO = {
     'CO': {'name': 'Carbon Monoxide', 'units': 'ppb', 'column_suffix': 'ppb'},
-    'NO2': {'name': 'Nitrogen Dioxide', 'units': 'μg/m³', 'column_suffix': 'ugm3'},
-    'O3': {'name': 'Ozone', 'units': 'μg/m³', 'column_suffix': 'ugm3'},
-    'SO2': {'name': 'Sulfur Dioxide', 'units': 'μg/m³', 'column_suffix': 'ugm3'},
+    'NO2': {'name': 'Nitrogen Dioxide', 'units': 'ppb', 'column_suffix': 'ppb'},
+    'O3': {'name': 'Ozone', 'units': 'ppb', 'column_suffix': 'ppb'},
+    'SO2': {'name': 'Sulfur Dioxide', 'units': 'ppb', 'column_suffix': 'ppb'},
     'PM25': {'name': 'PM2.5', 'units': 'μg/m³', 'column_suffix': 'ugm3'},
     'PM10': {'name': 'PM10', 'units': 'μg/m³', 'column_suffix': 'ugm3'}
 }
@@ -82,7 +105,7 @@ POLLUTANT_INFO = {
 # CSV headers
 CSV_HEADER = [
     "timestamp_utc", "location_label", "latitude", "longitude", "description",
-    "overall_aqi", "CO_ppb", "NO2_ugm3", "O3_ugm3", "SO2_ugm3", "PM25_ugm3", "PM10_ugm3"
+    "overall_aqi", "CO_ppb", "NO2_ppb", "O3_ppb", "SO2_ppb", "PM25_ugm3", "PM10_ugm3"
 ]
 
 # Cloud Storage Functions
@@ -364,10 +387,10 @@ function formatLocationData(locationData) {
                         <th>Overall AQI</th>           
                         <th>PM2.5 (μg/m³)</th>
                         <th>PM10 (μg/m³)</th>
-                        <th>NO2 (μg/m³)</th>
-                        <th>O3 (μg/m³)</th>
+                        <th>NO2 (ppb)</th>
+                        <th>O3 (ppb)</th>
                         <th>CO (ppb)</th>
-                        <th>SO2 (μg/m³)</th>
+                        <th>SO2 (ppb)</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -375,10 +398,10 @@ function formatLocationData(locationData) {
                         <td class="${locationData.overall_aqi ? getAQIClass(locationData.overall_aqi) : ''}">${locationData.overall_aqi || 'N/A'}</td>             
                         <td>${locationData.PM25_ugm3 || 'N/A'}</td>
                         <td>${locationData.PM10_ugm3 || 'N/A'}</td>
-                        <td>${locationData.NO2_ugm3 || 'N/A'}</td>
-                        <td>${locationData.O3_ugm3 || 'N/A'}</td>
+                        <td>${locationData.NO2_ppb || 'N/A'}</td>
+                        <td>${locationData.O3_ppb || 'N/A'}</td>
                         <td>${locationData.CO_ppb || 'N/A'}</td>
-                        <td>${locationData.SO2_ugm3 || 'N/A'}</td>
+                        <td>${locationData.SO2_ppb || 'N/A'}</td>
                     </tr>
                 </tbody>
             </table>

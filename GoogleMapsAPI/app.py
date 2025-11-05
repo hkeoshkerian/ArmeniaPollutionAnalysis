@@ -1,30 +1,56 @@
 #!/usr/bin/env python3
-import os, csv, json, time, threading, signal, sys
+import os, csv, json, time, sys
 from datetime import datetime, timezone
 from typing import List, Dict, Any
 import requests
 from flask import Flask, jsonify, send_file, Response
+from google.cloud import storage
 
 # ----------------------------
 # Config
 # ----------------------------
-POLL_INTERVAL_SEC = int(os.getenv("POLL_INTERVAL_SEC", "60"))
-CSV_PATH = os.getenv("CSV_PATH", "traffic_observations.csv")             # long format (1 row per corridor)
-COMPACT_WIDE_PATH = os.getenv("COMPACT_WIDE_PATH", "traffic_compact_wide.csv")  # compact wide: one column per corridor with JSON list [cong,dur,statdur,dist]
+CSV_PATH = os.getenv("CSV_PATH", "traffic_observations.csv")
 CORRIDORS_JSON = os.getenv("CORRIDORS_JSON", "corridors.json")
-PLOT_WINDOW_LIMIT = int(os.getenv("PLOT_WINDOW_LIMIT", "150"))           # how many recent points to show on the chart
+PLOT_WINDOW_LIMIT = int(os.getenv("PLOT_WINDOW_LIMIT", "150"))
 HOST = os.getenv("HOST", "0.0.0.0")
-PORT = int(os.getenv("PORT", "8000"))
+PORT = int(os.getenv("PORT", "8080"))
+
+# GCS Configuration
+GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "yerevan-traffic-data")
+GCS_CSV_PATH = os.getenv("GCS_CSV_PATH", "traffic_observations.csv")
+GCS_CORRIDORS_PATH = os.getenv("GCS_CORRIDORS_PATH", "corridors.json")
+USE_GCS = os.getenv("USE_GCS", "false").lower() == "true"
 
 ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
 FIELD_MASK = "routes.duration,routes.distanceMeters,routes.staticDuration,routes.travelAdvisory"
 
 app = Flask(__name__)
 
+# Initialize GCS client
+gcs_client = None
+if USE_GCS:
+    try:
+        gcs_client = storage.Client()
+        print(f"GCS client initialized, bucket: {GCS_BUCKET_NAME}")
+    except Exception as e:
+        print(f"Warning: Failed to initialize GCS client: {e}")
+        gcs_client = None
+
 # ----------------------------
-# Load corridors
+# File operations with GCS support
 # ----------------------------
 def load_corridors() -> List[Dict[str, Any]]:
+    if USE_GCS and gcs_client:
+        try:
+            bucket = gcs_client.bucket(GCS_BUCKET_NAME)
+            blob = bucket.blob(GCS_CORRIDORS_PATH)
+            content = blob.download_as_string().decode('utf-8')
+            print(f"Loaded corridors from GCS: {GCS_BUCKET_NAME}/{GCS_CORRIDORS_PATH}")
+            return json.loads(content)
+        except Exception as e:
+            print(f"Failed to load corridors from GCS, falling back to local: {e}")
+    
+    # Fallback to local file
     with open(CORRIDORS_JSON, "r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -41,39 +67,78 @@ CSV_HEADER = [
 ]
 
 def ensure_long_csv():
+    if USE_GCS and gcs_client:
+        # For GCS, we don't need to create the file in advance
+        return
+        
     if not os.path.exists(CSV_PATH):
         with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(CSV_HEADER)
 
-def _compact_wide_headers():
-    """
-    Compact wide header:
-    timestamp_utc, <label1>, <label2>, ...
-    Each corridor column contains a JSON list: [cong, dur, statdur, dist]
-    """
-    labels = [c["label"] for c in corridors]
-    return ["timestamp_utc"] + labels
-
-def ensure_compact_wide_csv():
-    if not os.path.exists(COMPACT_WIDE_PATH):
-        with open(COMPACT_WIDE_PATH, "w", newline="", encoding="utf-8") as f:
-            csv.writer(f).writerow(_compact_wide_headers())
-
 ensure_long_csv()
-ensure_compact_wide_csv()
+
+def append_to_csv(rows: List[Dict[str, Any]]):
+    """Append rows to CSV, both locally and to GCS if enabled"""
+    
+    # Local file append
+    with open(CSV_PATH, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=CSV_HEADER)
+        for row in rows:
+            w.writerow(row)
+    
+    # GCS append (download, append, upload)
+    if USE_GCS and gcs_client:
+        try:
+            bucket = gcs_client.bucket(GCS_BUCKET_NAME)
+            blob = bucket.blob(GCS_CSV_PATH)
+            
+            # Download existing content
+            try:
+                existing_content = blob.download_as_string().decode('utf-8')
+            except Exception:
+                # File doesn't exist yet, create with header
+                existing_content = ",".join(CSV_HEADER) + "\n"
+            
+            # Append new rows
+            output = existing_content
+            for row in rows:
+                output += ",".join(str(row.get(col, "")) for col in CSV_HEADER) + "\n"
+            
+            # Upload back to GCS
+            blob.upload_from_string(output, content_type='text/csv')
+            print(f"Appended {len(rows)} rows to GCS: {GCS_BUCKET_NAME}/{GCS_CSV_PATH}")
+            
+        except Exception as e:
+            print(f"Error updating GCS CSV: {e}")
+
+def download_csv_from_gcs() -> str:
+    """Download CSV from GCS to local file for serving"""
+    if USE_GCS and gcs_client:
+        try:
+            bucket = gcs_client.bucket(GCS_BUCKET_NAME)
+            blob = bucket.blob(GCS_CSV_PATH)
+            content = blob.download_as_string().decode('utf-8')
+            
+            # Write to local file for serving
+            with open(CSV_PATH, "w", encoding="utf-8") as f:
+                f.write(content)
+                
+            return CSV_PATH
+        except Exception as e:
+            print(f"Error downloading from GCS: {e}")
+    
+    return CSV_PATH
 
 # ----------------------------
-# In-memory caches (for APIs/portal)
+# In-memory caches
 # ----------------------------
-latest_cache: Dict[str, Dict[str, Any]] = {}   # label -> last row dict
-history_cache: Dict[str, list] = {}            # label -> list of (ts, cong, dur)
+latest_cache: Dict[str, Dict[str, Any]] = {}
+history_cache: Dict[str, list] = {}
 
 # Health tracking
 last_poll_at = None
 last_poll_error = None
 rows_written_total = 0
-
-stop_event = threading.Event()
 
 # ----------------------------
 # Helpers
@@ -89,46 +154,19 @@ def seconds_to_int(s: str):
             return None
     return None
 
-def write_compact_wide_row(ts_iso: str, rows: list):
-    """
-    Append ONE row to COMPACT_WIDE_PATH:
-      [ timestamp_utc,
-        json.dumps([cong, dur, statdur, dist]) for corridor1,
-        json.dumps([...]) for corridor2, ...
-      ]
-    If a corridor failed this poll, its cell is an empty string.
-    """
-    labels = [c["label"] for c in corridors]
-    by_label = { r["label"]: r for r in rows }
-
-    def pack(r: Dict[str, Any]) -> str:
-        return json.dumps([
-            r.get("congestion_index", None),
-            r.get("duration_sec", None),
-            r.get("static_sec", None),
-            r.get("distance_m", None),
-        ], ensure_ascii=False)
-
-    cells = []
-    for lab in labels:
-        r = by_label.get(lab)
-        cells.append(pack(r) if r else "")
-
-    out = [ts_iso] + cells
-    with open(COMPACT_WIDE_PATH, "a", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow(out)
-
 # ----------------------------
 # Poller
 # ----------------------------
 def poll_once():
     global last_poll_at, last_poll_error, rows_written_total
+    
+    print(f"Starting traffic poll at {datetime.now(timezone.utc).isoformat()}")
+    
     api_key = os.getenv("GOOGLE_MAPS_API_KEY")
     if not api_key:
-        last_poll_at = datetime.now(timezone.utc).isoformat()
         last_poll_error = "GOOGLE_MAPS_API_KEY is not set"
         print("ERROR: GOOGLE_MAPS_API_KEY is not set", file=sys.stderr)
-        return
+        return {"status": "error", "message": "API key not set"}
 
     headers = {
         "X-Goog-Api-Key": api_key,
@@ -138,6 +176,7 @@ def poll_once():
 
     ts = datetime.now(timezone.utc).isoformat()
     rows = []
+    successful_corridors = 0
 
     for c in corridors:
         label = c["label"]
@@ -175,38 +214,51 @@ def poll_once():
                 "advisory_json": json.dumps(advisory, ensure_ascii=False)
             }
             rows.append(row)
+            successful_corridors += 1
+            print(f"{label} - Congestion: {cong}, Duration: {dur}s")
+            
         except Exception as e:
-            last_poll_error = f"{label}: {e}"
-            print(f"[{ts}] ERROR {label}: {e}", file=sys.stderr)
+            error_msg = f"{label}: {str(e)}"
+            last_poll_error = error_msg
+            print(f"ERROR {error_msg}", file=sys.stderr)
 
     last_poll_at = ts
 
     if rows:
-        # Append long CSV (one row per corridor)
-        with open(CSV_PATH, "a", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=CSV_HEADER)
-            for row in rows:
-                w.writerow(row)
-                rows_written_total += 1
-                latest_cache[row["label"]] = row
-                history_cache.setdefault(row["label"], []).append(
-                    (row["timestamp_utc"], row["congestion_index"], row["duration_sec"])
-                )
+        # Use new append function that handles both local and GCS
+        append_to_csv(rows)
+        
+        for row in rows:
+            rows_written_total += 1
+            latest_cache[row["label"]] = row
+            
+            # Store with proper datetime for plotting
+            dt = datetime.fromisoformat(row["timestamp_utc"].replace('Z', '+00:00'))
+            history_cache.setdefault(row["label"], []).append(
+                (row["timestamp_utc"], row["congestion_index"], row["duration_sec"])
+            )
 
-        # Append one compact wide row (JSON lists per corridor column)
-        write_compact_wide_row(ts, rows)
-
-def poll_loop():
-    print(f"Poller started: interval={POLL_INTERVAL_SEC}s, CSV={CSV_PATH}, COMPACT_WIDE={COMPACT_WIDE_PATH}")
-    while not stop_event.is_set():
-        start = time.time()
-        poll_once()
-        elapsed = time.time() - start
-        to_sleep = max(0, POLL_INTERVAL_SEC - elapsed)
-        stop_event.wait(to_sleep)
+        last_poll_error = None
+    
+    return {
+        "status": "success",
+        "corridors_polled": successful_corridors,
+        "total_corridors": len(corridors),
+        "timestamp": last_poll_at
+    }
 
 # ----------------------------
-# Web portal (table + ONE chart)
+# Cloud Scheduler Endpoint
+# ----------------------------
+@app.route("/api/poll", methods=['POST', 'GET'])
+def trigger_poll():
+    """Endpoint for Cloud Scheduler to trigger polling"""
+    print("Cloud Scheduler triggered traffic poll")
+    result = poll_once()
+    return jsonify(result)
+
+# ----------------------------
+# Web portal
 # ----------------------------
 @app.route("/")
 def index():
@@ -227,20 +279,59 @@ th { background: #f5f5f5; }
 .status { margin: 0.2rem 0 1rem 0; }
 .badge { display:inline-block; padding:2px 6px; border-radius:6px; background:#eee; margin-right:6px; }
 .chartwrap { margin: 1.2rem 0; }
-#combined { width: 100%; height: 380px; }
+#combined { width: 100%; height: 400px; }
+.cloud-scheduler-info { background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 1rem 0; }
+.gcs-info { background: #e8f0f5; padding: 15px; border-radius: 5px; margin: 1rem 0; }
+.legend-controls { background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 1rem 0; max-height: 300px; overflow-y: auto; border: 1px solid #ddd; }
+.legend-buttons { margin-bottom: 15px; position: sticky; top: 0; background: #f9f9f9; padding: 10px 0; z-index: 10; }
+.legend-btn { padding: 8px 12px; margin-right: 8px; background: #007cba; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
+.legend-btn:hover { background: #005a87; }
+.legend-checkboxes { display: flex; flex-direction: column; gap: 4px; }
+.legend-item { display: flex; align-items: center; padding: 4px 8px; border-radius: 3px; }
+.legend-item:hover { background: #f0f0f0; }
+.legend-item input { margin-right: 10px; flex-shrink: 0; }
+.legend-color { display: inline-block; width: 16px; height: 16px; margin-right: 10px; border-radius: 3px; border: 1px solid #ddd; flex-shrink: 0; }
+.legend-label { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.route-count { margin-left: 10px; color: #666; font-size: 11px; }
 </style>
 </head>
 <body>
   <h1>Yerevan Traffic Monitor</h1>
   <div class="status">
-    <span class="badge">Polling every __INTERVAL__s</span>
+    <span class="badge">Cloud Scheduler Powered</span>
+    <span class="badge">GCS Storage: ''' + ("Enabled" if USE_GCS else "Disabled") + '''</span>
     <span class="badge"><a href="/export.csv">Download long CSV</a></span>
-    <span class="badge"><a href="/export_compact_wide.csv">Download compact wide CSV</a></span>
     <span class="badge"><a href="/api/latest">Latest JSON</a></span>
+    <span class="badge"><a href="/api/poll" target="_blank">Manual Poll</a></span>
+  </div>
+
+  <div class="cloud-scheduler-info">
+    <strong>Cloud Scheduler Integration</strong><br>
+    This app uses Google Cloud Scheduler to trigger polling automatically every 5 minutes.<br>
+    Manual poll: <a href="/api/poll" target="_blank">Trigger Now</a>
+  </div>
+
+  <div class="gcs-info">
+    <strong>Google Cloud Storage: ''' + ("Enabled" if USE_GCS else "Disabled") + '''</strong><br>
+    ''' + (f"Bucket: {GCS_BUCKET_NAME}, CSV: {GCS_CSV_PATH}" if USE_GCS else "GCS is not enabled. Set USE_GCS=true to enable cloud storage.") + '''
   </div>
 
   <div class="chartwrap">
     <canvas id="combined"></canvas>
+  </div>
+
+  <div class="legend-controls">
+    <div class="legend-buttons">
+      <strong>Route Controls:</strong>
+      <button class="legend-btn" onclick="showAllRoutes()">Show All</button>
+      <button class="legend-btn" onclick="hideAllRoutes()">Hide All</button>
+      <button class="legend-btn" onclick="showOnlyAB()">Show Only AB</button>
+      <button class="legend-btn" onclick="showOnlyBA()">Show Only BA</button>
+      <span class="route-count" id="routeCount">0 routes visible</span>
+    </div>
+    <div class="legend-checkboxes" id="routeCheckboxes">
+      <!-- Checkboxes will be populated by JavaScript -->
+    </div>
   </div>
 
   <table id="live">
@@ -263,7 +354,187 @@ th { background: #f5f5f5; }
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@^1"></script>
 
 <script>
-const WINDOW_LIMIT = __WINDOW_LIMIT__;
+const WINDOW_LIMIT = ''' + str(PLOT_WINDOW_LIMIT) + ''';
+const RIGHT_PAD_MINUTES = 10;
+
+let combinedChart;
+let allRoutesData = {};
+let routeColors = {};
+
+// ---------- Route Control Functions ----------
+function updateRouteCount() {
+  if (combinedChart) {
+    const visibleCount = combinedChart.data.datasets.filter((ds, index) => {
+      const meta = combinedChart.getDatasetMeta(index);
+      return !meta.hidden;
+    }).length;
+    document.getElementById('routeCount').textContent = `${visibleCount} routes visible`;
+  }
+}
+
+function populateRouteCheckboxes() {
+  const container = document.getElementById('routeCheckboxes');
+  container.innerHTML = '';
+  
+  Object.keys(allRoutesData).sort().forEach(route => {
+    const color = routeColors[route] || '#cccccc';
+    const isChecked = combinedChart ? !combinedChart.getDatasetMeta(
+      combinedChart.data.datasets.findIndex(ds => ds.label === route)
+    )?.hidden : true;
+    
+    const div = document.createElement('div');
+    div.className = 'legend-item';
+    div.innerHTML = `
+      <input type="checkbox" id="route_${route}" value="${route}" ${isChecked ? 'checked' : ''} onchange="toggleRoute('${route}')">
+      <span class="legend-color" style="background-color: ${color};"></span>
+      <label for="route_${route}" class="legend-label" title="${route}">${route}</label>
+    `;
+    container.appendChild(div);
+  });
+  
+  updateRouteCount();
+}
+
+function toggleRoute(route) {
+  if (combinedChart) {
+    const index = combinedChart.data.datasets.findIndex(ds => ds.label === route);
+    if (index !== -1) {
+      const meta = combinedChart.getDatasetMeta(index);
+      meta.hidden = !meta.hidden;
+      combinedChart.update();
+      updateRouteCount();
+    }
+  }
+}
+
+function showAllRoutes() {
+  if (combinedChart) {
+    combinedChart.data.datasets.forEach((dataset, index) => {
+      const meta = combinedChart.getDatasetMeta(index);
+      meta.hidden = false;
+    });
+    combinedChart.update();
+    populateRouteCheckboxes();
+  }
+}
+
+function hideAllRoutes() {
+  if (combinedChart) {
+    combinedChart.data.datasets.forEach((dataset, index) => {
+      const meta = combinedChart.getDatasetMeta(index);
+      meta.hidden = true;
+    });
+    combinedChart.update();
+    populateRouteCheckboxes();
+  }
+}
+
+function showOnlyAB() {
+  if (combinedChart) {
+    combinedChart.data.datasets.forEach((dataset, index) => {
+      const meta = combinedChart.getDatasetMeta(index);
+      meta.hidden = !dataset.label.endsWith('_AB');
+    });
+    combinedChart.update();
+    populateRouteCheckboxes();
+  }
+}
+
+function showOnlyBA() {
+  if (combinedChart) {
+    combinedChart.data.datasets.forEach((dataset, index) => {
+      const meta = combinedChart.getDatasetMeta(index);
+      meta.hidden = !dataset.label.endsWith('_BA');
+    });
+    combinedChart.update();
+    populateRouteCheckboxes();
+  }
+}
+
+// ---------- Chart Functions ----------
+async function buildChart(){
+  const res = await fetch('/api/all_history?limit=' + encodeURIComponent(WINDOW_LIMIT), { cache: 'no-store' });
+  allRoutesData = await res.json();
+
+  const labels = Object.keys(allRoutesData).sort();
+  const datasets = labels.map((label, i) => {
+    const raw = (allRoutesData[label] || []).filter(p => p && p[1] != null);
+    
+    const points = raw.map(p => {
+      const dt = luxon.DateTime.fromISO(p[0]);
+      return {
+        x: dt.toFormat('HH:mm:ss'),
+        y: p[1],
+        fullTime: dt.toLocaleString(luxon.DateTime.DATETIME_MED)
+      };
+    });
+
+    const hue = Math.floor(i * 360 / Math.max(1, labels.length));
+    const color = `hsl(${hue}, 70%, 45%)`;
+    routeColors[label] = color;
+
+    return {
+      label,
+      data: points,
+      showLine: true,
+      spanGaps: true,
+      borderColor: color,
+      backgroundColor: color,
+      borderWidth: 1.5,
+      pointRadius: 2,
+      pointHoverRadius: 4,
+      tension: 0.1,
+      hidden: false
+    };
+  });
+
+  if (combinedChart) combinedChart.destroy();
+  const ctx = document.getElementById('combined').getContext('2d');
+  combinedChart = new Chart(ctx, {
+    type: 'line',
+    data: { datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'nearest', intersect: false },
+      plugins: {
+        legend: { 
+          display: false
+        },
+        tooltip: {
+          callbacks: {
+            title: function(items) {
+              if (items.length > 0 && items[0].raw.fullTime) {
+                return items[0].raw.fullTime;
+              }
+              return '';
+            },
+            label: item => `${item.dataset.label}: ${item.formattedValue}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'category',
+          title: { display: true, text: 'Time' },
+          ticks: {
+            autoSkip: true,
+            maxTicksLimit: 12
+          }
+        },
+        y: {
+          min: 0.5,
+          max: 3,
+          title: { display: true, text: 'Congestion Index (duration / static)' }
+        }
+      }
+    }
+  });
+
+  populateRouteCheckboxes();
+  refreshTable();
+}
 
 // ---------- Live table ----------
 async function refreshTable(){
@@ -272,6 +543,7 @@ async function refreshTable(){
     const data = await res.json();
     const tbody = document.querySelector('#live tbody');
     tbody.innerHTML = '';
+    
     const rows = Object.values(data).sort((a,b) => (a.label || '').localeCompare(b.label || ''));
     rows.forEach(row => {
       const tr = document.createElement('tr');
@@ -285,93 +557,17 @@ async function refreshTable(){
     });
   } catch(e) { console.error(e); }
 }
-refreshTable();
-setInterval(refreshTable, 15000);
 
-// ---------- Combined congestion chart (dots + lines, last N points) ----------
-const RIGHT_PAD = 10; // how many empty "slots" to leave on the right
-
-let combinedChart;
-
-async function buildChart(){
-  const res = await fetch('/api/all_history?limit=' + encodeURIComponent(WINDOW_LIMIT), { cache: 'no-store' });
-  const all = await res.json(); // { label: [[tsISO, cong, dur], ...], ... }
-
-  const labels = Object.keys(all).sort();
-
-  // Build index-based points: x = 1..N, y = congestion
-  const datasets = labels.map((label, i) => {
-    const raw = (all[label] || []).filter(p => p && p[1] != null);
-    const points = raw.map((p, idx) => ({ x: idx + 1, y: p[1] }));
-
-    const hue = Math.floor(i * 360 / Math.max(1, labels.length));
-    return {
-      label,
-      data: points,
-      showLine: true,
-      spanGaps: true,
-      borderColor: `hsl(${hue}, 70%, 45%)`,
-      backgroundColor: `hsl(${hue}, 70%, 45%)`,
-      borderWidth: 2,
-      pointRadius: 3,
-      pointHoverRadius: 5,
-      tension: 0
-    };
-  });
-
-  // --- Sliding window calc ---
-  const lastX = datasets.reduce((m, d) => Math.max(m, d.data.length), 0);
-  const xMax  = lastX + RIGHT_PAD;                 // leave space on the right
-  const xMin  = Math.max(1, xMax - WINDOW_LIMIT + 1); // show only the last WINDOW_LIMIT points
-
-  if (combinedChart) combinedChart.destroy();
-  const ctx = document.getElementById('combined').getContext('2d');
-  combinedChart = new Chart(ctx, {
-    type: 'line',
-    data: { datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,   // make sure canvas has CSS height set
-      parsing: false,
-      animation: false,
-      interaction: { mode: 'nearest', intersect: false },
-      elements: { point: { radius: 3 } },
-      plugins: {
-        legend: { position: 'bottom' },
-        tooltip: {
-          callbacks: {
-            title: items => `Point #${items[0]?.parsed?.x ?? ''}`,
-            label: item => `${item.dataset.label}: ${item.formattedValue}`
-          }
-        }
-      },
-      scales: {
-        x: {
-          type: 'linear',
-          min: xMin,
-          max: xMax,
-          title: { display: true, text: `Latest ${WINDOW_LIMIT} points (padded)` },
-          ticks: { autoSkip: true }
-        },
-        y: {
-          min: 0,
-          max: 3,
-          title: { display: true, text: 'Congestion Index (duration / static)' }
-        }
-      }
-    }
-  });
-}
-
+// Initialize
 buildChart();
-setInterval(buildChart, 30000);
+setInterval(() => {
+  buildChart();
+}, 30000);
+setInterval(refreshTable, 15000);
 </script>
 </body>
 </html>
 '''
-    # Avoid str.format(); replace simple tokens safely
-    html = html.replace("__INTERVAL__", str(POLL_INTERVAL_SEC))
-    html = html.replace("__WINDOW_LIMIT__", str(PLOT_WINDOW_LIMIT))
     return Response(html, mimetype="text/html")
 
 # ----------------------------
@@ -399,16 +595,15 @@ def api_all_history():
     limit = int(request.args.get("limit", "150"))
     out = {}
     for label, series in history_cache.items():
-        out[label] = series[-limit:]   # last N points only (hide old data)
+        out[label] = series[-limit:]
     return jsonify(out)
 
 @app.route("/export.csv")
 def export_csv():
+    if USE_GCS and gcs_client:
+        # Ensure we have the latest from GCS
+        download_csv_from_gcs()
     return send_file(CSV_PATH, as_attachment=True, download_name="traffic_observations.csv")
-
-@app.route("/export_compact_wide.csv")
-def export_compact_wide():
-    return send_file(COMPACT_WIDE_PATH, as_attachment=True, download_name="traffic_compact_wide.csv")
 
 @app.route("/api/health")
 def api_health():
@@ -416,28 +611,24 @@ def api_health():
         "last_poll_at": last_poll_at,
         "last_poll_error": last_poll_error,
         "rows_written_total": rows_written_total,
-        "poll_interval_sec": POLL_INTERVAL_SEC,
-        "csv_path": CSV_PATH,
-        "compact_wide_path": COMPACT_WIDE_PATH,
-        "labels": [c["label"] for c in corridors]
+        "corridors_monitored": len(corridors),
+        "gcs_enabled": USE_GCS,
+        "gcs_bucket": GCS_BUCKET_NAME if USE_GCS else None,
+        "service_url": "https://yerevantrafficmonitor-578058838716.europe-west1.run.app"
     })
 
 # ----------------------------
-# Lifecycle
+# Main
 # ----------------------------
-def handle_sigterm(signum, frame):
-    stop_event.set()
-
-signal.signal(signal.SIGTERM, handle_sigterm)
-signal.signal(signal.SIGINT, handle_sigterm)
-
 if __name__ == "__main__":
-    t = threading.Thread(target=poll_loop, daemon=True)
-    t.start()
-    try:
-        # Poll once at startup so the page & chart have data immediately
-        poll_once()
-        app.run(host=HOST, port=PORT)
-    finally:
-        stop_event.set()
-        t.join(timeout=5)
+    print(f"Starting Yerevan Traffic Monitor")
+    print(f"Monitoring {len(corridors)} corridors")
+    print(f"GCS Storage: {'Enabled' if USE_GCS else 'Disabled'}")
+    if USE_GCS:
+        print(f"GCS Bucket: {GCS_BUCKET_NAME}")
+    
+    # Initial poll at startup
+    poll_once()
+    
+    print(f"Starting web server on {HOST}:{PORT}")
+    app.run(host=HOST, port=PORT, debug=False)

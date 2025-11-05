@@ -10,9 +10,9 @@ Each row in the CSV has the format:
 
 The app displays the congestion index on a simple web portal.
 
-The portal is deployed on **https://www.render.com** and can be accessed at:
+The portal is deployed on Google Cloud Run and can be accessed at:
 
-👉 [https://armeniapollutionanalysis.onrender.com/](https://armeniapollutionanalysis.onrender.com/)
+👉 [https://yerevantrafficmonitor-578058838716.europe-west1.run.app/](https://yerevantrafficmonitor-578058838716.europe-west1.run.app/)
 
 *(Currently suspended to avoid exhausting Google API free credits.)*
 
