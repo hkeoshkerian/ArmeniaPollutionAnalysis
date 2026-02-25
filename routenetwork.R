@@ -124,7 +124,7 @@ run_greedy <- function(candidate_paths, n_edges, edge_vals, max_routes, score_by
 
 # ── 10. 2D SWEEP: route counts (20–40) × max length (4km–8km) ────────────────
 route_counts   <- seq(20, 40, by = 2)
-max_lengths_km <- seq(4, 8, by = 0.5)
+max_lengths_km <- seq(4, 12, by = 0.5)
 
 # Initialise result matrices
 pop_matrix    <- matrix(NA, nrow = length(max_lengths_km),
@@ -233,3 +233,106 @@ legend("bottomleft",
        legend = paste0("R", routes_final_sf$route_id,
                        " (", round(routes_final_sf$pop / 1000, 1), "k pop)"),
        col    = rainbow(nrow(routes_final_sf)), lwd = 2, cex = 0.45)
+
+# ── FINAL EXPORT: Selected routes with start, end, and 9 evenly-spaced waypoints ──
+
+# ── ADJUSTABLE PARAMETERS ─────────────────────────────────────────────────────
+EXPORT_MAX_KM  <- 8.5    # max route length constraint for this export
+EXPORT_N_ROUTES <- 38   # number of routes for this export
+N_WAYPOINTS    <- 9     # number of intermediate waypoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Re-run greedy with chosen parameters to get the selected routes
+export_cands <- Filter(function(p) p$length_m <= EXPORT_MAX_KM * 1000, all_candidate_paths)
+covered_exp  <- rep(FALSE, n_edges)
+export_routes <- list()
+
+for (r in seq_len(EXPORT_N_ROUTES)) {
+  if (all(covered_exp)) break
+  scores <- sapply(export_cands, function(p) sum(edge_sf$pop[p$eids[!covered_exp[p$eids]]]))
+  best_i <- which.max(scores)
+  if (scores[best_i] == 0) break
+  covered_exp[export_cands[[best_i]]$eids] <- TRUE
+  ro <- export_cands[[best_i]]
+  export_routes[[r]] <- list(
+    route_id = r,
+    edge_ids = ro$eids,
+    length_m = ro$length_m,
+    pop      = ro$pop
+  )
+}
+
+# ── EXTRACT GEOMETRY AND COMPUTE WAYPOINTS ────────────────────────────────────
+route_export_rows <- lapply(export_routes, function(ro) {
+  
+  # Merge all edge geometries into a single LINESTRING
+  route_line <- edge_sf[ro$edge_ids, ] %>%
+    st_union() %>%
+    st_line_merge() %>%           # merge into single continuous line where possible
+    st_cast("LINESTRING")
+  
+  # If st_line_merge produces MULTILINESTRING, take the longest piece
+  if (st_geometry_type(route_line) == "MULTILINESTRING") {
+    parts      <- st_cast(st_sf(geometry = route_line), "LINESTRING")
+    parts$len  <- as.numeric(st_length(parts))
+    route_line <- parts$geometry[which.max(parts$len)]
+  }
+  
+  # Total route length
+  route_length_m <- as.numeric(st_length(route_line))
+  
+  # Sample N_WAYPOINTS + 2 evenly-spaced points (includes start and end)
+  # distances: 0%, ~9%, ~18%, ... 100% of total length
+  n_total_pts  <- N_WAYPOINTS + 2
+  distances    <- seq(0, route_length_m, length.out = n_total_pts)
+  sampled_pts  <- st_line_sample(route_line, sample = distances / route_length_m) %>%
+    st_cast("POINT") %>%
+    st_transform(4326)   # convert back to WGS84 lat/lon for Google Maps API
+  
+  coords <- st_coordinates(sampled_pts)   # matrix: [lon, lat]
+  
+  # Build named output row
+  row <- data.frame(
+    route_id     = ro$route_id,
+    length_km    = round(ro$length_m / 1000, 3),
+    pop_covered  = round(ro$pop, 0),
+    # Full route as WKT for reference
+    route_wkt    = st_as_text(st_transform(route_line, 4326)),
+    # Start and end
+    start_lat    = round(coords[1,   "Y"], 6),
+    start_lon    = round(coords[1,   "X"], 6),
+    end_lat      = round(coords[nrow(coords), "Y"], 6),
+    end_lon      = round(coords[nrow(coords), "X"], 6),
+    stringsAsFactors = FALSE
+  )
+  
+  # Add 9 intermediate waypoints as separate columns
+  waypoint_rows <- coords[2:(N_WAYPOINTS + 1), , drop = FALSE]
+  for (w in seq_len(N_WAYPOINTS)) {
+    row[[paste0("wp", w, "_lat")]] <- round(waypoint_rows[w, "Y"], 6)
+    row[[paste0("wp", w, "_lon")]] <- round(waypoint_rows[w, "X"], 6)
+  }
+  
+  row
+})
+
+# Combine into a single data frame
+routes_export_df <- do.call(rbind, route_export_rows)
+rownames(routes_export_df) <- NULL
+
+# ── PREVIEW ───────────────────────────────────────────────────────────────────
+cat(sprintf("Exported %d routes (≤ %gkm, population-optimised)\n",
+            nrow(routes_export_df), EXPORT_MAX_KM))
+print(routes_export_df[, c("route_id", "length_km", "pop_covered",
+                           "start_lat", "start_lon", "end_lat", "end_lon",
+                           "wp1_lat", "wp1_lon")])
+
+# ── EXPORT TO CSV ─────────────────────────────────────────────────────────────
+export_path <- sprintf(
+  "C:\Users\mrealehatem\Documents\GitHub\ArmeniaPollutionAnalysis\Route Network Optimizing",
+  EXPORT_MAX_KM, EXPORT_N_ROUTES
+)
+write.csv(routes_export_df, export_path, row.names = FALSE)
+message(sprintf("Saved to: %s", export_path))
+
+
