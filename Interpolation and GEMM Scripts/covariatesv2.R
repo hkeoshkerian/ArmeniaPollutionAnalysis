@@ -2,182 +2,218 @@ library(terra)
 library(sf)
 library(exactextractr)
 library(data.table)
+library(osmextract)
+library(dplyr)
+library(progressr)
 
+handlers(global = TRUE)
+handlers("progress")
+
+# -----------------------------------------------------------------------
 # Paths - UPDATE THESE
+# -----------------------------------------------------------------------
 yerevan_shp    <- "C:/Users/mrealehatem/OneDrive/AUA/Air pollution/Data/am_yerevan.shp"
 pop_path       <- "C:/Users/mrealehatem/Documents/GitHub/ArmeniaPollutionAnalysis/WorldPopData/arm_age_data/pop.tif"
 landcover_path <- "C:/Users/mrealehatem/Downloads/worldcover.tif"
 chm_paths      <- paste0("C:/Users/mrealehatem/Downloads/veg", 17:25, ".tif")
 roads_pbf      <- "C:/Users/mrealehatem/Downloads/armenia.pbf"
 
-library(osmextract)
-library(dplyr)
+BUFFER_RADII <- c(100, 200, 500)
 
-# --- Read & prep roads ---
+# -----------------------------------------------------------------------
+# 0. Roads — read once, reproject once
+# -----------------------------------------------------------------------
+cat("Reading roads...\n")
 armenia_roads_oe <- oe_read(
   roads_pbf,
-  layer     = "lines",
+  layer      = "lines",
   extra_tags = c("lanes", "maxspeed")
 )
 armenia_roads_oe <- armenia_roads_oe[!is.na(armenia_roads_oe$highway), ]
 
 yerevan <- st_read(yerevan_shp) |> st_transform(32638)
-
-if (st_crs(armenia_roads_oe) != st_crs(yerevan)) {
-  armenia_roads_oe <- st_transform(armenia_roads_oe, st_crs(yerevan))
-}
+armenia_roads_oe <- st_transform(armenia_roads_oe, 32638)
 
 yerevan_roads <- st_intersection(armenia_roads_oe, yerevan)
-
 yerevan_roads$lanes <- as.numeric(yerevan_roads$lanes)
-routes <- yerevan_roads %>%
+
+routes <- yerevan_roads |>
   filter(lanes >= 4 | highway %in% c("primary", "trunk"))
 
-# 1. Create 100m grid
+cat("✓ Roads ready:", nrow(yerevan_roads), "segments\n")
+
+# -----------------------------------------------------------------------
+# 1. Create 100 m grid + centroids
+# -----------------------------------------------------------------------
 grid_raw  <- st_make_grid(yerevan, cellsize = 100, what = "polygons")
-grid_100m <- st_sf(grid_id = 1:length(grid_raw), geometry = grid_raw)
+grid_100m <- st_sf(grid_id = seq_along(grid_raw), geometry = grid_raw)
 grid_100m <- st_intersection(grid_100m, yerevan)
 cents     <- st_centroid(grid_100m)
-cat("Grid:", nrow(grid_100m), "cells\n")
+n_cells   <- nrow(grid_100m)
+cat("Grid:", n_cells, "cells\n")
 
-# 2. Population (mean in 100m, 200m, 500m buffers)
-pop_rast <- raster::raster(pop_path)
-pop_rast <- raster::projectRaster(pop_rast, crs = "+proj=utm +zone=38 +datum=WGS84")
+# Pre-compute all buffer sets once — reused across all sections
+bufs_list <- setNames(
+  lapply(BUFFER_RADII, function(r) {
+    b        <- st_buffer(cents, r)
+    b$buf_id <- seq_len(nrow(b))
+    b
+  }),
+  paste0("r", BUFFER_RADII)
+)
+cat("✓ Buffers pre-computed\n")
 
-for (r in c(100, 200, 500)) {
-  bufs <- st_buffer(cents, r)
-  vals <- exact_extract(pop_rast, bufs, "mean", progress = FALSE)
-  grid_100m[[paste0("pop_mean_", r, "m")]] <- vals
-}
+# -----------------------------------------------------------------------
+# 2. Population — reproject buffers to raster CRS, never touch the raster
+# -----------------------------------------------------------------------
+cat("\n[2/5] Population...\n")
+pop_rast <- terra::rast(pop_path)
+
+with_progress({
+  p <- progressor(steps = length(BUFFER_RADII))
+  for (r in BUFFER_RADII) {
+    bufs_native <- st_transform(bufs_list[[paste0("r", r)]], terra::crs(pop_rast))
+    vals        <- exact_extract(pop_rast, bufs_native, "mean", progress = FALSE)
+    grid_100m[[paste0("pop_mean_", r, "m")]] <- vals
+    p(message = sprintf("pop %dm done", r))
+  }
+})
 cat("✓ Population extracted\n")
 
-# 3. Vegetation height and volume
-for (i in seq_along(chm_paths)) {
-  year        <- 2016 + i
-  year_suffix <- substr(as.character(year), 3, 4)
+# -----------------------------------------------------------------------
+# 3. Vegetation height and volume — terra + reproject buffers, not raster
+# -----------------------------------------------------------------------
+cat("\n[3/5] Vegetation...\n")
+existing_chm <- chm_paths[file.exists(chm_paths)]
+cat(" Found", length(existing_chm), "CHM files\n")
+
+with_progress({
+  p <- progressor(steps = length(existing_chm) * length(BUFFER_RADII))
   
-  if (file.exists(chm_paths[i])) {
-    chm_rast <- raster::raster(chm_paths[i])
-    chm_rast <- raster::projectRaster(chm_rast, crs = "+proj=utm +zone=38 +datum=WGS84")
+  for (chm_path in existing_chm) {
+    year_suffix <- regmatches(
+      chm_path,
+      regexpr("(?<=veg)\\d{2}", chm_path, perl = TRUE)
+    )
     
-    for (r in c(100, 200, 500)) {
-      bufs     <- st_buffer(cents, r)
-      veg_vals <- exact_extract(chm_rast, bufs, "mean", progress = FALSE)
+    chm_rast <- terra::rast(chm_path)  # lazy load — no reprojection of raster
+    
+    for (r in BUFFER_RADII) {
+      # Reproject buffers to match raster CRS — fast, small object
+      bufs_native <- st_transform(bufs_list[[paste0("r", r)]], terra::crs(chm_rast))
+      
+      veg_vals <- exact_extract(chm_rast, bufs_native, "mean", progress = FALSE)
+      
       grid_100m[[paste0("veg", year_suffix, "_height_", r, "m")]] <- veg_vals
       grid_100m[[paste0("veg", year_suffix, "_volume_", r, "m")]] <- veg_vals * (pi * r^2)
+      p(message = sprintf("veg%s %dm done", year_suffix, r))
     }
-    cat("✓ Vegetation extracted for", year, "\n")
   }
-}
+})
+cat("✓ Vegetation extracted\n")
 
-# 4. Landcover (% per class in buffers)
+# -----------------------------------------------------------------------
+# 4. Landcover — fast built-in "frac" (single C++ pass per radius)
+# -----------------------------------------------------------------------
+cat("\n[4/5] Landcover...\n")
 if (file.exists(landcover_path)) {
-  library(progressr)
+  lc_rast <- terra::rast(landcover_path)
+  # Reproject raster once here only — justified because "frac" needs consistent
+  # pixel alignment, and we do it once not per-loop
+  lc_rast <- terra::project(lc_rast, "epsg:32638", method = "near")
   
-  lc_rast   <- terra::rast(landcover_path)
-  lc_rast   <- terra::project(lc_rast, "epsg:32638")
-  lc_classes <- terra::unique(lc_rast)[, 1]
-  lc_classes <- lc_classes[!is.na(lc_classes)]
-  
-  with_progress({
-    p <- progressor(steps = length(c(100, 200, 500)))
+  for (r in BUFFER_RADII) {
+    cat(sprintf("  %dm buffer (progress below):\n", r))
     
-    for (r in c(100, 200, 500)) {
-      bufs       <- st_buffer(cents, r)
-      lc_extract <- exact_extract(lc_rast, bufs, function(values, coverage_fraction) {
-        total_coverage <- sum(coverage_fraction, na.rm = TRUE)
-        sapply(lc_classes, function(lc_class) {
-          sum((values == lc_class) * coverage_fraction, na.rm = TRUE) /
-            total_coverage * 100
-        })
-      }, progress = FALSE)
-      
-      if (is.matrix(lc_extract)) {
-        for (j in seq_along(lc_classes))
-          grid_100m[[paste0("lc", lc_classes[j], "_pct_", r, "m")]] <- lc_extract[, j]
-      } else {
-        for (j in seq_along(lc_classes))
-          grid_100m[[paste0("lc", lc_classes[j], "_pct_", r, "m")]] <-
-            sapply(lc_extract, function(x) x[j])
-      }
-      
-      p(message = sprintf("Completed %dm buffer (%d classes)", r, length(lc_classes)))
-    }
-  })
+    # Native C++ progress bar via progress = TRUE
+    lc_frac <- exact_extract(
+      lc_rast,
+      bufs_list[[paste0("r", r)]],
+      "frac",
+      progress = TRUE
+    )
+    
+    # Rename frac_<val> → lc<val>_pct_<r>m, scale 0–1 → 0–100
+    names(lc_frac) <- gsub("^frac_(.+)$", paste0("lc\\1_pct_", r, "m"), names(lc_frac))
+    lc_frac        <- lc_frac * 100
+    
+    grid_100m <- cbind(grid_100m, lc_frac)
+    cat(sprintf("  ✓ %dm done (%d classes)\n", r, ncol(lc_frac)))
+  }
   cat("✓ Landcover extracted\n")
 }
 
 # -----------------------------------------------------------------------
-# 5. Road length within buffers + distance to nearest primary road  (NEW)
+# 5. Road length within buffers + distance to nearest primary road
 # -----------------------------------------------------------------------
+cat("\n[5/5] Roads...\n")
 
-# 5a. Ensure roads are in UTM 32638 (metric CRS) for accurate length/distance
-yerevan_roads_utm <- st_transform(yerevan_roads, 32638)
+# 5a. Road length per buffer radius
+# 5a. Road length per buffer radius
+with_progress({
+  p <- progressor(steps = length(BUFFER_RADII))
+  
+  for (r in BUFFER_RADII) {
+    bufs <- bufs_list[[paste0("r", r)]]
+    
+    # Use full sf object (not st_geometry) so attributes survive intersection
+    road_clip <- st_intersection(yerevan_roads, bufs["buf_id"])
+    
+    # Keep only line geometries
+    road_clip <- road_clip[
+      st_geometry_type(road_clip) %in% c("LINESTRING", "MULTILINESTRING"), 
+    ]
+    
+    # Build clean data.table directly
+    len_df <- data.table(
+      buf_id  = as.integer(road_clip$buf_id),
+      seg_len = as.numeric(st_length(road_clip))
+    )
+    
+    # Sum lengths per buffer cell
+    len_by_buf <- len_df[, .(seg_len = sum(seg_len, na.rm = TRUE)), by = buf_id]
+    
+    # Left-join to full grid, fill missing with 0
+    result <- merge(
+      data.table(buf_id = seq_len(n_cells)),
+      len_by_buf,
+      by    = "buf_id",
+      all.x = TRUE
+    )
+    result[is.na(seg_len), seg_len := 0]
+    
+    grid_100m[[paste0("road_length_", r, "m")]] <- result$seg_len
+    p(message = sprintf("road length %dm done", r))
+  }
+})
 
-# 5b. Road length (metres) within 100 m, 200 m, 500 m buffers
-#     Strategy: for each buffer radius, intersect buffer polygons with the
-#     full road network, then sum st_length() per buffer id.
+cat("✓ Road lengths computed\n")
 
-for (r in c(100, 200, 500)) {
-  bufs      <- st_buffer(cents, r)
-  bufs$buf_id <- seq_len(nrow(bufs))          # stable join key
-  
-  # Intersect roads with buffers → each road segment clipped to its buffer(s)
-  road_clip <- st_intersection(
-    st_geometry(yerevan_roads_utm),            # just geometry for speed
-    bufs["buf_id"]                             # keep buf_id attribute
-  )
-  
-  # Sum clipped segment lengths per buffer
-  road_clip$seg_len <- as.numeric(st_length(road_clip))
-  
-  len_by_buf <- aggregate(seg_len ~ buf_id,
-                          data = st_drop_geometry(road_clip),
-                          FUN  = sum)
-  
-  # Left-join so cells with zero roads get 0
-  result <- merge(
-    data.frame(buf_id = seq_len(nrow(cents))),
-    len_by_buf,
-    by    = "buf_id",
-    all.x = TRUE
-  )
-  result$seg_len[is.na(result$seg_len)] <- 0
-  
-  grid_100m[[paste0("road_length_", r, "m")]] <- result$seg_len
-  cat("✓ Road length computed for", r, "m buffer\n")
-}
 
-# 5c. Distance (metres) from each grid centroid to the nearest primary road
-primary_roads <- yerevan_roads_utm %>%
-  filter(highway == "primary")
+# 5b. Distance to nearest primary road
+primary_roads <- filter(yerevan_roads, highway == "primary")
 
 if (nrow(primary_roads) > 0) {
-  # st_nearest_feature returns the index of the nearest primary road for each centroid
-  cents_utm   <- st_transform(cents, 32638)
-  nearest_idx <- st_nearest_feature(cents_utm, primary_roads)
+  cat("  Computing distance to nearest primary road...\n")
   
-  # st_distance between each centroid and its matched primary road geometry
-  dist_to_primary <- mapply(
-    function(pt_idx, rd_idx) {
-      as.numeric(
-        st_distance(cents_utm[pt_idx, ], primary_roads[rd_idx, ])
-      )
-    },
-    seq_len(nrow(cents_utm)),
-    nearest_idx
-  )
+  nearest_idx <- st_nearest_feature(cents, primary_roads)
   
-  grid_100m$dist_primary_road_m <- dist_to_primary
-  cat("✓ Distance to nearest primary road computed\n")
+  # Single vectorised call — extract diagonal of matched pairs
+  near_geom     <- primary_roads[nearest_idx, ]
+  dist_primary  <- as.numeric(diag(st_distance(cents, near_geom)))
+  
+  grid_100m$dist_primary_road_m <- dist_primary
+  cat("✓ Distance to primary road computed\n")
 } else {
-  warning("No primary roads found in yerevan_roads — dist_primary_road_m skipped.")
+  warning("No primary roads found — dist_primary_road_m set to NA")
   grid_100m$dist_primary_road_m <- NA_real_
 }
 
 # -----------------------------------------------------------------------
 # 6. Export
 # -----------------------------------------------------------------------
+cat("\nExporting...\n")
 output_df <- st_drop_geometry(grid_100m) |> as.data.table()
 fwrite(output_df, "yerevan_grid_full_covariates.csv")
-cat("\n✅ Saved:", ncol(output_df), "columns for", nrow(output_df), "grid cells\n")
+cat("✅ Saved:", ncol(output_df), "columns for", nrow(output_df), "grid cells\n")
+
