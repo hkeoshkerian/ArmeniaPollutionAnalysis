@@ -12,7 +12,8 @@ handlers("progress")
 # -----------------------------------------------------------------------
 # Paths - UPDATE THESE
 # -----------------------------------------------------------------------
-yerevan_shp    <- "C:/Users/mrealehatem/OneDrive/AUA/Air pollution/Data/am_yerevan.shp"
+yerevan_shp <- sf::st_read("C:/Users/mrealehatem/Documents/GitHub/ArmeniaPollutionAnalysis/Yerevan Boundary/boundary.gpkg",
+                           layer = "boundary-polygon-lvl4")
 pop_path       <- "C:/Users/mrealehatem/Documents/GitHub/ArmeniaPollutionAnalysis/WorldPopData/arm_age_data/pop.tif"
 landcover_path <- "C:/Users/mrealehatem/Downloads/worldcover.tif"
 chm_paths      <- paste0("C:/Users/mrealehatem/Downloads/veg", 17:25, ".tif")
@@ -31,7 +32,7 @@ armenia_roads_oe <- oe_read(
 )
 armenia_roads_oe <- armenia_roads_oe[!is.na(armenia_roads_oe$highway), ]
 
-yerevan <- st_read(yerevan_shp) |> st_transform(32638)
+yerevan <- yerevan_shp |> st_transform(32638)
 armenia_roads_oe <- st_transform(armenia_roads_oe, 32638)
 
 yerevan_roads <- st_intersection(armenia_roads_oe, yerevan)
@@ -149,7 +150,6 @@ if (file.exists(landcover_path)) {
 cat("\n[5/5] Roads...\n")
 
 # 5a. Road length per buffer radius
-# 5a. Road length per buffer radius
 with_progress({
   p <- progressor(steps = length(BUFFER_RADII))
   
@@ -214,6 +214,10 @@ if (nrow(primary_roads) > 0) {
 # -----------------------------------------------------------------------
 cat("\nExporting...\n")
 output_df <- st_drop_geometry(grid_100m) |> as.data.table()
-fwrite(output_df, "yerevan_grid_full_covariates.csv")
+output_path <- "C:/Users/mrealehatem/Documents/GitHub/ArmeniaPollutionAnalysis/yerevan_grid_full_covariates.csv"
+fwrite(output_df, output_path)
+gpkg_path <- "C:/Users/mrealehatem/Documents/GitHub/ArmeniaPollutionAnalysis/yerevan_grid_full_covariates.gpkg"
+st_write(grid_100m, gpkg_path, delete_dsn = TRUE)
+cat("✅ Spatial file saved:", gpkg_path, "\n")
 cat("✅ Saved:", ncol(output_df), "columns for", nrow(output_df), "grid cells\n")
-
+cat("   →", output_path, "\n")
