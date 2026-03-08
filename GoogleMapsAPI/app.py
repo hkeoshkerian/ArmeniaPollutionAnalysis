@@ -404,7 +404,12 @@ function populateRouteCheckboxes() {
   const container = document.getElementById('routeCheckboxes');
   container.innerHTML = '';
   
-  Object.keys(allRoutesData).sort().forEach(route => {
+    // Sort routes numerically (route_1, route_2, route_3, etc.)
+    Object.keys(allRoutesData).sort((a, b) => {
+        const numA = parseInt(a.split('_')[1]);
+        const numB = parseInt(b.split('_')[1]);
+        return numA - numB;
+    }).forEach(route => {
     const color = routeColors[route] || '#cccccc';
     const isChecked = combinedChart ? !combinedChart.getDatasetMeta(
       combinedChart.data.datasets.findIndex(ds => ds.label === route)
@@ -572,7 +577,12 @@ async function refreshTable(){
     const tbody = document.querySelector('#live tbody');
     tbody.innerHTML = '';
     
-    const rows = Object.values(data).sort((a,b) => (a.label || '').localeCompare(b.label || ''));
+    // Sort table rows numerically
+    const rows = Object.values(data).sort((a, b) => {
+        const numA = parseInt((a.label || 'route_0').split('_')[1]);
+        const numB = parseInt((b.label || 'route_0').split('_')[1]);
+        return numA - numB;
+    });
     rows.forEach(row => {
       const tr = document.createElement('tr');
       tr.innerHTML = `<td>${row.label || ''}</td>
