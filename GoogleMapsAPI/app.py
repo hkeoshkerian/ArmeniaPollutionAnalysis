@@ -6,11 +6,12 @@ import requests
 from flask import Flask, jsonify, send_file, Response
 from google.cloud import storage
 
+
 # ----------------------------
 # Config
 # ----------------------------
 CSV_PATH = os.getenv("CSV_PATH", "traffic_observations.csv")
-CORRIDORS_JSON = os.getenv("CORRIDORS_JSON", "corridors.json")
+CORRIDORS_JSON = os.getenv("CORRIDORS_JSON", "routes_network.json")
 PLOT_WINDOW_LIMIT = int(os.getenv("PLOT_WINDOW_LIMIT", "150"))
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8080"))
@@ -18,11 +19,12 @@ PORT = int(os.getenv("PORT", "8080"))
 # GCS Configuration
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "yerevan-traffic-data")
 GCS_CSV_PATH = os.getenv("GCS_CSV_PATH", "traffic_observations.csv")
-GCS_CORRIDORS_PATH = os.getenv("GCS_CORRIDORS_PATH", "corridors.json")
+GCS_CORRIDORS_PATH = os.getenv("GCS_CORRIDORS_PATH", "routes_network.json")
 USE_GCS = os.getenv("USE_GCS", "false").lower() == "true"
 
 ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
 FIELD_MASK = "routes.duration,routes.distanceMeters,routes.staticDuration,routes.travelAdvisory"
+
 
 app = Flask(__name__)
 
@@ -157,96 +159,122 @@ def seconds_to_int(s: str):
 # ----------------------------
 # Poller
 # ----------------------------
+poll_in_progress = False
+
 def poll_once():
-    global last_poll_at, last_poll_error, rows_written_total
-    
-    print(f"Starting traffic poll at {datetime.now(timezone.utc).isoformat()}")
-    
-    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
-    if not api_key:
-        last_poll_error = "GOOGLE_MAPS_API_KEY is not set"
-        print("ERROR: GOOGLE_MAPS_API_KEY is not set", file=sys.stderr)
-        return {"status": "error", "message": "API key not set"}
+    global last_poll_at, last_poll_error, rows_written_total, poll_in_progress
 
-    headers = {
-        "X-Goog-Api-Key": api_key,
-        "X-Goog-FieldMask": FIELD_MASK,
-        "Content-Type": "application/json"
-    }
+    if poll_in_progress:
+        print("Poll already running, skipping...")
+        return {"status": "skipped", "message": "Poll already in progress"}
 
-    ts = datetime.now(timezone.utc).isoformat()
-    rows = []
-    successful_corridors = 0
+    poll_in_progress = True
 
-    for c in corridors:
-        label = c["label"]
-        o = c["origin"]; d = c["dest"]
-        body = {
-            "origin": {"location": {"latLng": {"latitude": o["lat"], "longitude": o["lng"]}}},
-            "destination": {"location": {"latLng": {"latitude": d["lat"], "longitude": d["lng"]}}},
-            "travelMode": "DRIVE",
-            "routingPreference": "TRAFFIC_AWARE"
-        }
-        try:
-            r = requests.post(ROUTES_URL, headers=headers, json=body, timeout=20)
-            r.raise_for_status()
-            data = r.json()
-            route = (data.get("routes") or [{}])[0]
-            dur = seconds_to_int(route.get("duration"))
-            static_dur = seconds_to_int(route.get("staticDuration"))
-            dist = route.get("distanceMeters", None)
-            cong = None
-            if dur and static_dur and static_dur > 0:
-                cong = round(dur / static_dur, 3)
-            advisory = route.get("travelAdvisory", {})
-
-            row = {
-                "timestamp_utc": ts,
-                "label": label,
-                "origin_lat": o["lat"],
-                "origin_lng": o["lng"],
-                "dest_lat": d["lat"],
-                "dest_lng": d["lng"],
-                "duration_sec": dur,
-                "static_sec": static_dur,
-                "distance_m": dist,
-                "congestion_index": cong,
-                "advisory_json": json.dumps(advisory, ensure_ascii=False)
-            }
-            rows.append(row)
-            successful_corridors += 1
-            print(f"{label} - Congestion: {cong}, Duration: {dur}s")
-            
-        except Exception as e:
-            error_msg = f"{label}: {str(e)}"
-            last_poll_error = error_msg
-            print(f"ERROR {error_msg}", file=sys.stderr)
-
-    last_poll_at = ts
-
-    if rows:
-        # Use new append function that handles both local and GCS
-        append_to_csv(rows)
+    try:
+        print(f"Starting traffic poll at {datetime.now(timezone.utc).isoformat()}")
         
-        for row in rows:
-            rows_written_total += 1
-            latest_cache[row["label"]] = row
+        api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+        if not api_key:
+            last_poll_error = "GOOGLE_MAPS_API_KEY is not set"
+            print("ERROR: GOOGLE_MAPS_API_KEY is not set", file=sys.stderr)
+            return {"status": "error", "message": "API key not set"}
+
+        headers = {
+            "X-Goog-Api-Key": api_key,
+            "X-Goog-FieldMask": FIELD_MASK,
+            "Content-Type": "application/json"
+        }
+
+        ts = datetime.now(timezone.utc).isoformat()
+        rows = []
+        successful_corridors = 0
+
+        for c in corridors:
+            label = c["label"]
+            o = c["origin"]
+            d = c["dest"]
             
-            # Store with proper datetime for plotting
-            dt = datetime.fromisoformat(row["timestamp_utc"].replace('Z', '+00:00'))
-            history_cache.setdefault(row["label"], []).append(
-                (row["timestamp_utc"], row["congestion_index"], row["duration_sec"])
-            )
+            # Build the base request body
+            body = {
+                "origin": {"location": {"latLng": {"latitude": o["lat"], "longitude": o["lng"]}}},
+                "destination": {"location": {"latLng": {"latitude": d["lat"], "longitude": d["lng"]}}},
+                "travelMode": "DRIVE",
+                "routingPreference": "TRAFFIC_AWARE"
+            }
+            
+            # Add waypoints if they exist - THIS LOCKS THE ROUTE
+            if "waypoints" in c and c["waypoints"]:
+                body["intermediates"] = [
+                    {
+                        "location": {"latLng": {"latitude": wp["lat"], "longitude": wp["lng"]}},
+                        "via": True  # Pass-through points, not stops
+                    }
+                    for wp in c["waypoints"]
+                ]
+                print(f"{label} - Using {len(c['waypoints'])} waypoints to lock the route")
+            
+            try:
+                r = requests.post(ROUTES_URL, headers=headers, json=body, timeout=20)
+                r.raise_for_status()
+                data = r.json()
+                route = (data.get("routes") or [{}])[0]
+                dur = seconds_to_int(route.get("duration"))
+                static_dur = seconds_to_int(route.get("staticDuration"))
+                dist = route.get("distanceMeters", None)
+                cong = None
+                if dur and static_dur and static_dur > 0:
+                    cong = round(dur / static_dur, 3)
+                advisory = route.get("travelAdvisory", {})
 
-        last_poll_error = None
-    
-    return {
-        "status": "success",
-        "corridors_polled": successful_corridors,
-        "total_corridors": len(corridors),
-        "timestamp": last_poll_at
-    }
+                row = {
+                    "timestamp_utc": ts,
+                    "label": label,
+                    "origin_lat": o["lat"],
+                    "origin_lng": o["lng"],
+                    "dest_lat": d["lat"],
+                    "dest_lng": d["lng"],
+                    "duration_sec": dur,
+                    "static_sec": static_dur,
+                    "distance_m": dist,
+                    "congestion_index": cong,
+                    "advisory_json": json.dumps(advisory, ensure_ascii=False)
+                }
+                rows.append(row)
+                successful_corridors += 1
+                print(f"{label} - Congestion: {cong}, Duration: {dur}s")
+                
+            except Exception as e:
+                error_msg = f"{label}: {str(e)}"
+                last_poll_error = error_msg
+                print(f"ERROR {error_msg}", file=sys.stderr)
 
+        last_poll_at = ts
+
+        if rows:
+            # Use new append function that handles both local and GCS
+            append_to_csv(rows)
+            
+            for row in rows:
+                rows_written_total += 1
+                latest_cache[row["label"]] = row
+                
+                # Store with proper datetime for plotting
+                dt = datetime.fromisoformat(row["timestamp_utc"].replace('Z', '+00:00'))
+                history_cache.setdefault(row["label"], []).append(
+                    (row["timestamp_utc"], row["congestion_index"], row["duration_sec"])
+                )
+
+            last_poll_error = None
+        
+        return {
+            "status": "success",
+            "corridors_polled": successful_corridors,
+            "total_corridors": len(corridors),
+            "timestamp": last_poll_at
+        }
+    finally:
+        poll_in_progress = False
+        
 # ----------------------------
 # Cloud Scheduler Endpoint
 # ----------------------------
@@ -307,10 +335,10 @@ th { background: #f5f5f5; }
 
   <div class="cloud-scheduler-info">
     <strong>Cloud Scheduler Integration</strong><br>
-    This app uses Google Cloud Scheduler to trigger polling automatically every 5 minutes.<br>
+    This app uses Google Cloud Scheduler to trigger polling automatically.<br>
     Manual poll: <a href="/api/poll" target="_blank">Trigger Now</a>
   </div>
-
+  
   <div class="gcs-info">
     <strong>Google Cloud Storage: ''' + ("Enabled" if USE_GCS else "Disabled") + '''</strong><br>
     ''' + (f"Bucket: {GCS_BUCKET_NAME}, CSV: {GCS_CSV_PATH}" if USE_GCS else "GCS is not enabled. Set USE_GCS=true to enable cloud storage.") + '''
