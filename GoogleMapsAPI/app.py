@@ -58,6 +58,12 @@ def load_corridors() -> List[Dict[str, Any]]:
 
 corridors = load_corridors()
 
+# ----------------------------
+# In-memory caches
+# ----------------------------
+latest_cache: Dict[str, Dict[str, Any]] = {}
+history_cache: Dict[str, list] = {}
+
 # After loading corridors, load existing history
 def load_existing_history():
     """Load historical data from CSV into memory cache"""
@@ -120,9 +126,6 @@ def load_existing_history():
                 # Update latest (keep the most recent)
                 latest_cache[label] = row
             
-            records_loaded = sum(len(v) for v in history_cache.values())
-            print(f"Loaded {records_loaded} historical records into cache")
-            print(f"Labels found: {list(history_cache.keys())}")
     except Exception as e:
         print(f"Could not load existing history: {e}")
         import traceback
@@ -204,11 +207,6 @@ def download_csv_from_gcs() -> str:
     
     return CSV_PATH
 
-# ----------------------------
-# In-memory caches
-# ----------------------------
-latest_cache: Dict[str, Dict[str, Any]] = {}
-history_cache: Dict[str, list] = {}
 
 # Health tracking
 last_poll_at = None
@@ -561,18 +559,6 @@ function showOnlyBA() {
 async function buildChart(){
   const res = await fetch('/api/all_history?limit=' + encodeURIComponent(WINDOW_LIMIT), { cache: 'no-store' });
   allRoutesData = await res.json();
-
-  // Debug log
-  console.log('Chart data received:', allRoutesData);
-  console.log('Number of routes:', Object.keys(allRoutesData).length);
-  for (const [route, points] of Object.entries(allRoutesData)) {
-    console.log(`${route}: ${points.length} points`);
-    if (points.length > 0) {
-      console.log('First point:', points[0]);
-      console.log('Last point:', points[points.length-1]);
-    }
-  }
-  
 
   const labels = Object.keys(allRoutesData).sort();
   const datasets = labels.map((label, i) => {
