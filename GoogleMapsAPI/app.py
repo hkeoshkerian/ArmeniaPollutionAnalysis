@@ -58,47 +58,75 @@ def load_corridors() -> List[Dict[str, Any]]:
 
 corridors = load_corridors()
 
-
 # After loading corridors, load existing history
 def load_existing_history():
     """Load historical data from CSV into memory cache"""
     global history_cache, latest_cache
     
     try:
-        # Try to read existing CSV
-        if os.path.exists(CSV_PATH):
+        csv_content = None
+        
+        # Try to get from GCS first if enabled
+        if USE_GCS and gcs_client:
+            try:
+                bucket = gcs_client.bucket(GCS_BUCKET_NAME)
+                blob = bucket.blob(GCS_CSV_PATH)
+                csv_content = blob.download_as_string().decode('utf-8')
+                print(f"Loaded CSV from GCS: {GCS_BUCKET_NAME}/{GCS_CSV_PATH}")
+                
+                # Also save locally for other uses
+                with open(CSV_PATH, "w", encoding="utf-8") as f:
+                    f.write(csv_content)
+                    
+            except Exception as e:
+                print(f"Could not load from GCS: {e}")
+        
+        # If GCS failed or not enabled, try local file
+        if csv_content is None and os.path.exists(CSV_PATH):
+            print(f"Loading from local file: {CSV_PATH}")
             with open(CSV_PATH, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    label = row['label']
-                    timestamp = row['timestamp_utc']
-                    
-                    # Convert values
-                    cong_index = None
-                    try:
-                        if row['congestion_index']:
-                            cong_index = float(row['congestion_index'])
-                    except (ValueError, TypeError):
-                        pass
-                    
-                    duration = None
-                    try:
-                        if row['duration_sec']:
-                            duration = int(float(row['duration_sec']))
-                    except (ValueError, TypeError):
-                        pass
-                    
-                    # Add to history cache
-                    history_cache.setdefault(label, []).append(
-                        (timestamp, cong_index, duration)
-                    )
-                    
-                    # Update latest
-                    latest_cache[label] = row
+                csv_content = f.read()
+        
+        if csv_content:
+            # Parse CSV content
+            reader = csv.DictReader(csv_content.splitlines())
+            rows = list(reader)
+            print(f"Total rows in CSV: {len(rows)}")
             
-            print(f"Loaded historical data: {sum(len(v) for v in history_cache.values())} records")
+            for row in rows:
+                label = row['label']
+                timestamp = row['timestamp_utc']
+                
+                # Convert values
+                cong_index = None
+                try:
+                    if row['congestion_index'] and row['congestion_index'].strip():
+                        cong_index = float(row['congestion_index'])
+                except (ValueError, TypeError):
+                    pass
+                
+                duration = None
+                try:
+                    if row['duration_sec'] and row['duration_sec'].strip():
+                        duration = int(float(row['duration_sec']))
+                except (ValueError, TypeError):
+                    pass
+                
+                # Add to history cache
+                history_cache.setdefault(label, []).append(
+                    (timestamp, cong_index, duration)
+                )
+                
+                # Update latest (keep the most recent)
+                latest_cache[label] = row
+            
+            records_loaded = sum(len(v) for v in history_cache.values())
+            print(f"Loaded {records_loaded} historical records into cache")
+            print(f"Labels found: {list(history_cache.keys())}")
     except Exception as e:
         print(f"Could not load existing history: {e}")
+        import traceback
+        traceback.print_exc()
 
 # Call it
 load_existing_history()
