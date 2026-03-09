@@ -534,6 +534,18 @@ async function buildChart(){
   const res = await fetch('/api/all_history?limit=' + encodeURIComponent(WINDOW_LIMIT), { cache: 'no-store' });
   allRoutesData = await res.json();
 
+  // Debug log
+  console.log('Chart data received:', allRoutesData);
+  console.log('Number of routes:', Object.keys(allRoutesData).length);
+  for (const [route, points] of Object.entries(allRoutesData)) {
+    console.log(`${route}: ${points.length} points`);
+    if (points.length > 0) {
+      console.log('First point:', points[0]);
+      console.log('Last point:', points[points.length-1]);
+    }
+  }
+  
+
   const labels = Object.keys(allRoutesData).sort();
   const datasets = labels.map((label, i) => {
     const raw = (allRoutesData[label] || []).filter(p => p && p[1] != null);
@@ -679,6 +691,11 @@ def api_all_history():
     out = {}
     for label, series in history_cache.items():
         out[label] = series[-limit:]
+
+    # Add debug info
+    print(f"API all_history called - returning {sum(len(v) for v in out.values())} total points")
+    print(f"Labels in response: {list(out.keys())}")
+
     return jsonify(out)
 
 @app.route("/export.csv")
