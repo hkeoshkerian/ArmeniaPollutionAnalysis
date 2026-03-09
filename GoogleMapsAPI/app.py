@@ -58,6 +58,51 @@ def load_corridors() -> List[Dict[str, Any]]:
 
 corridors = load_corridors()
 
+
+# After loading corridors, load existing history
+def load_existing_history():
+    """Load historical data from CSV into memory cache"""
+    global history_cache, latest_cache
+    
+    try:
+        # Try to read existing CSV
+        if os.path.exists(CSV_PATH):
+            with open(CSV_PATH, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    label = row['label']
+                    timestamp = row['timestamp_utc']
+                    
+                    # Convert values
+                    cong_index = None
+                    try:
+                        if row['congestion_index']:
+                            cong_index = float(row['congestion_index'])
+                    except (ValueError, TypeError):
+                        pass
+                    
+                    duration = None
+                    try:
+                        if row['duration_sec']:
+                            duration = int(float(row['duration_sec']))
+                    except (ValueError, TypeError):
+                        pass
+                    
+                    # Add to history cache
+                    history_cache.setdefault(label, []).append(
+                        (timestamp, cong_index, duration)
+                    )
+                    
+                    # Update latest
+                    latest_cache[label] = row
+            
+            print(f"Loaded historical data: {sum(len(v) for v in history_cache.values())} records")
+    except Exception as e:
+        print(f"Could not load existing history: {e}")
+
+# Call it
+load_existing_history()
+
 # ----------------------------
 # CSV headers & ensure files
 # ----------------------------
