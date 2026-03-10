@@ -639,7 +639,7 @@ async function buildChart(){
         },
         y: {
           min: 0.5,
-          max: 3,
+          max: 4,
           title: { display: true, text: 'Congestion Index (duration / static)' }
         }
       }
