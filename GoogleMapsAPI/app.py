@@ -564,12 +564,12 @@ async function buildChart(){
   const datasets = labels.map((label, i) => {
     const raw = (allRoutesData[label] || []).filter(p => p && p[1] != null);
     
+    // Use the FULL ISO timestamp, not just time
     const points = raw.map(p => {
-      const dt = luxon.DateTime.fromISO(p[0]);
       return {
-        x: dt.toFormat('HH:mm:ss'),
+        x: p[0],  // Use the full ISO timestamp string (e.g., "2026-03-09T08:30:00Z")
         y: p[1],
-        fullTime: dt.toLocaleString(luxon.DateTime.DATETIME_MED)
+        fullTime: luxon.DateTime.fromISO(p[0]).toLocaleString(luxon.DateTime.DATETIME_MED)
       };
     });
 
@@ -620,16 +620,26 @@ async function buildChart(){
       },
       scales: {
         x: {
-          type: 'category',
-          title: { display: true, text: 'Time' },
+          type: 'time',  // Changed from 'category' to 'time'
+          time: {
+            displayFormats: {
+              hour: 'HH:mm',        // Show hour:minute
+              minute: 'HH:mm',       // Show hour:minute
+              day: 'MMM d, HH:mm'    // Show date and time for day scale
+            },
+            tooltipFormat: 'MMM d, yyyy, HH:mm:ss'  // Full datetime in tooltip
+          },
+          title: { display: true, text: 'Time (UTC)' },
           ticks: {
+            source: 'auto',
+            maxRotation: 45,
             autoSkip: true,
             maxTicksLimit: 12
           }
         },
         y: {
           min: 0.5,
-          max: 4,
+          max: 3,
           title: { display: true, text: 'Congestion Index (duration / static)' }
         }
       }
