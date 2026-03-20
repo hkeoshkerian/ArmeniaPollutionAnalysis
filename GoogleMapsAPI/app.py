@@ -6,11 +6,12 @@ import requests
 from flask import Flask, jsonify, send_file, Response
 from google.cloud import storage
 
+
 # ----------------------------
 # Config
 # ----------------------------
 CSV_PATH = os.getenv("CSV_PATH", "traffic_observations.csv")
-CORRIDORS_JSON = os.getenv("CORRIDORS_JSON", "corridors.json")
+CORRIDORS_JSON = os.getenv("CORRIDORS_JSON", "routes_network.json")
 PLOT_WINDOW_LIMIT = int(os.getenv("PLOT_WINDOW_LIMIT", "150"))
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8080"))
@@ -18,11 +19,12 @@ PORT = int(os.getenv("PORT", "8080"))
 # GCS Configuration
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "yerevan-traffic-data")
 GCS_CSV_PATH = os.getenv("GCS_CSV_PATH", "traffic_observations.csv")
-GCS_CORRIDORS_PATH = os.getenv("GCS_CORRIDORS_PATH", "corridors.json")
+GCS_CORRIDORS_PATH = os.getenv("GCS_CORRIDORS_PATH", "routes_network.json")
 USE_GCS = os.getenv("USE_GCS", "false").lower() == "true"
 
 ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
 FIELD_MASK = "routes.duration,routes.distanceMeters,routes.staticDuration,routes.travelAdvisory"
+
 
 app = Flask(__name__)
 
@@ -55,6 +57,82 @@ def load_corridors() -> List[Dict[str, Any]]:
         return json.load(f)
 
 corridors = load_corridors()
+
+# ----------------------------
+# In-memory caches
+# ----------------------------
+latest_cache: Dict[str, Dict[str, Any]] = {}
+history_cache: Dict[str, list] = {}
+
+# After loading corridors, load existing history
+def load_existing_history():
+    """Load historical data from CSV into memory cache"""
+    global history_cache, latest_cache
+    
+    try:
+        csv_content = None
+        
+        # Try to get from GCS first if enabled
+        if USE_GCS and gcs_client:
+            try:
+                bucket = gcs_client.bucket(GCS_BUCKET_NAME)
+                blob = bucket.blob(GCS_CSV_PATH)
+                csv_content = blob.download_as_string().decode('utf-8')
+                print(f"Loaded CSV from GCS: {GCS_BUCKET_NAME}/{GCS_CSV_PATH}")
+                
+                # Also save locally for other uses
+                with open(CSV_PATH, "w", encoding="utf-8") as f:
+                    f.write(csv_content)
+                    
+            except Exception as e:
+                print(f"Could not load from GCS: {e}")
+        
+        # If GCS failed or not enabled, try local file
+        if csv_content is None and os.path.exists(CSV_PATH):
+            print(f"Loading from local file: {CSV_PATH}")
+            with open(CSV_PATH, 'r', encoding='utf-8') as f:
+                csv_content = f.read()
+        
+        if csv_content:
+            # Parse CSV content
+            reader = csv.DictReader(csv_content.splitlines())
+            rows = list(reader)
+            print(f"Total rows in CSV: {len(rows)}")
+            
+            for row in rows:
+                label = row['label']
+                timestamp = row['timestamp_utc']
+                
+                # Convert values
+                cong_index = None
+                try:
+                    if row['congestion_index'] and row['congestion_index'].strip():
+                        cong_index = float(row['congestion_index'])
+                except (ValueError, TypeError):
+                    pass
+                
+                duration = None
+                try:
+                    if row['duration_sec'] and row['duration_sec'].strip():
+                        duration = int(float(row['duration_sec']))
+                except (ValueError, TypeError):
+                    pass
+                
+                # Add to history cache
+                history_cache.setdefault(label, []).append(
+                    (timestamp, cong_index, duration)
+                )
+                
+                # Update latest (keep the most recent)
+                latest_cache[label] = row
+            
+    except Exception as e:
+        print(f"Could not load existing history: {e}")
+        import traceback
+        traceback.print_exc()
+
+# Call it
+load_existing_history()
 
 # ----------------------------
 # CSV headers & ensure files
@@ -129,11 +207,6 @@ def download_csv_from_gcs() -> str:
     
     return CSV_PATH
 
-# ----------------------------
-# In-memory caches
-# ----------------------------
-latest_cache: Dict[str, Dict[str, Any]] = {}
-history_cache: Dict[str, list] = {}
 
 # Health tracking
 last_poll_at = None
@@ -157,96 +230,122 @@ def seconds_to_int(s: str):
 # ----------------------------
 # Poller
 # ----------------------------
+poll_in_progress = False
+
 def poll_once():
-    global last_poll_at, last_poll_error, rows_written_total
-    
-    print(f"Starting traffic poll at {datetime.now(timezone.utc).isoformat()}")
-    
-    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
-    if not api_key:
-        last_poll_error = "GOOGLE_MAPS_API_KEY is not set"
-        print("ERROR: GOOGLE_MAPS_API_KEY is not set", file=sys.stderr)
-        return {"status": "error", "message": "API key not set"}
+    global last_poll_at, last_poll_error, rows_written_total, poll_in_progress
 
-    headers = {
-        "X-Goog-Api-Key": api_key,
-        "X-Goog-FieldMask": FIELD_MASK,
-        "Content-Type": "application/json"
-    }
+    if poll_in_progress:
+        print("Poll already running, skipping...")
+        return {"status": "skipped", "message": "Poll already in progress"}
 
-    ts = datetime.now(timezone.utc).isoformat()
-    rows = []
-    successful_corridors = 0
+    poll_in_progress = True
 
-    for c in corridors:
-        label = c["label"]
-        o = c["origin"]; d = c["dest"]
-        body = {
-            "origin": {"location": {"latLng": {"latitude": o["lat"], "longitude": o["lng"]}}},
-            "destination": {"location": {"latLng": {"latitude": d["lat"], "longitude": d["lng"]}}},
-            "travelMode": "DRIVE",
-            "routingPreference": "TRAFFIC_AWARE"
-        }
-        try:
-            r = requests.post(ROUTES_URL, headers=headers, json=body, timeout=20)
-            r.raise_for_status()
-            data = r.json()
-            route = (data.get("routes") or [{}])[0]
-            dur = seconds_to_int(route.get("duration"))
-            static_dur = seconds_to_int(route.get("staticDuration"))
-            dist = route.get("distanceMeters", None)
-            cong = None
-            if dur and static_dur and static_dur > 0:
-                cong = round(dur / static_dur, 3)
-            advisory = route.get("travelAdvisory", {})
-
-            row = {
-                "timestamp_utc": ts,
-                "label": label,
-                "origin_lat": o["lat"],
-                "origin_lng": o["lng"],
-                "dest_lat": d["lat"],
-                "dest_lng": d["lng"],
-                "duration_sec": dur,
-                "static_sec": static_dur,
-                "distance_m": dist,
-                "congestion_index": cong,
-                "advisory_json": json.dumps(advisory, ensure_ascii=False)
-            }
-            rows.append(row)
-            successful_corridors += 1
-            print(f"{label} - Congestion: {cong}, Duration: {dur}s")
-            
-        except Exception as e:
-            error_msg = f"{label}: {str(e)}"
-            last_poll_error = error_msg
-            print(f"ERROR {error_msg}", file=sys.stderr)
-
-    last_poll_at = ts
-
-    if rows:
-        # Use new append function that handles both local and GCS
-        append_to_csv(rows)
+    try:
+        print(f"Starting traffic poll at {datetime.now(timezone.utc).isoformat()}")
         
-        for row in rows:
-            rows_written_total += 1
-            latest_cache[row["label"]] = row
+        api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+        if not api_key:
+            last_poll_error = "GOOGLE_MAPS_API_KEY is not set"
+            print("ERROR: GOOGLE_MAPS_API_KEY is not set", file=sys.stderr)
+            return {"status": "error", "message": "API key not set"}
+
+        headers = {
+            "X-Goog-Api-Key": api_key,
+            "X-Goog-FieldMask": FIELD_MASK,
+            "Content-Type": "application/json"
+        }
+
+        ts = datetime.now(timezone.utc).isoformat()
+        rows = []
+        successful_corridors = 0
+
+        for c in corridors:
+            label = c["label"]
+            o = c["origin"]
+            d = c["dest"]
             
-            # Store with proper datetime for plotting
-            dt = datetime.fromisoformat(row["timestamp_utc"].replace('Z', '+00:00'))
-            history_cache.setdefault(row["label"], []).append(
-                (row["timestamp_utc"], row["congestion_index"], row["duration_sec"])
-            )
+            # Build the base request body
+            body = {
+                "origin": {"location": {"latLng": {"latitude": o["lat"], "longitude": o["lng"]}}},
+                "destination": {"location": {"latLng": {"latitude": d["lat"], "longitude": d["lng"]}}},
+                "travelMode": "DRIVE",
+                "routingPreference": "TRAFFIC_AWARE"
+            }
+            
+            # Add waypoints if they exist - THIS LOCKS THE ROUTE
+            if "waypoints" in c and c["waypoints"]:
+                body["intermediates"] = [
+                    {
+                        "location": {"latLng": {"latitude": wp["lat"], "longitude": wp["lng"]}},
+                        "via": True  # Pass-through points, not stops
+                    }
+                    for wp in c["waypoints"]
+                ]
+                print(f"{label} - Using {len(c['waypoints'])} waypoints to lock the route")
+            
+            try:
+                r = requests.post(ROUTES_URL, headers=headers, json=body, timeout=20)
+                r.raise_for_status()
+                data = r.json()
+                route = (data.get("routes") or [{}])[0]
+                dur = seconds_to_int(route.get("duration"))
+                static_dur = seconds_to_int(route.get("staticDuration"))
+                dist = route.get("distanceMeters", None)
+                cong = None
+                if dur and static_dur and static_dur > 0:
+                    cong = round(dur / static_dur, 3)
+                advisory = route.get("travelAdvisory", {})
 
-        last_poll_error = None
-    
-    return {
-        "status": "success",
-        "corridors_polled": successful_corridors,
-        "total_corridors": len(corridors),
-        "timestamp": last_poll_at
-    }
+                row = {
+                    "timestamp_utc": ts,
+                    "label": label,
+                    "origin_lat": o["lat"],
+                    "origin_lng": o["lng"],
+                    "dest_lat": d["lat"],
+                    "dest_lng": d["lng"],
+                    "duration_sec": dur,
+                    "static_sec": static_dur,
+                    "distance_m": dist,
+                    "congestion_index": cong,
+                    "advisory_json": json.dumps(advisory, ensure_ascii=False)
+                }
+                rows.append(row)
+                successful_corridors += 1
+                print(f"{label} - Congestion: {cong}, Duration: {dur}s")
+                
+            except Exception as e:
+                error_msg = f"{label}: {str(e)}"
+                last_poll_error = error_msg
+                print(f"ERROR {error_msg}", file=sys.stderr)
 
+        last_poll_at = ts
+
+        if rows:
+            # Use new append function that handles both local and GCS
+            append_to_csv(rows)
+            
+            for row in rows:
+                rows_written_total += 1
+                latest_cache[row["label"]] = row
+                
+                # Store with proper datetime for plotting
+                dt = datetime.fromisoformat(row["timestamp_utc"].replace('Z', '+00:00'))
+                history_cache.setdefault(row["label"], []).append(
+                    (row["timestamp_utc"], row["congestion_index"], row["duration_sec"])
+                )
+
+            last_poll_error = None
+        
+        return {
+            "status": "success",
+            "corridors_polled": successful_corridors,
+            "total_corridors": len(corridors),
+            "timestamp": last_poll_at
+        }
+    finally:
+        poll_in_progress = False
+        
 # ----------------------------
 # Cloud Scheduler Endpoint
 # ----------------------------
@@ -307,10 +406,10 @@ th { background: #f5f5f5; }
 
   <div class="cloud-scheduler-info">
     <strong>Cloud Scheduler Integration</strong><br>
-    This app uses Google Cloud Scheduler to trigger polling automatically every 5 minutes.<br>
+    This app uses Google Cloud Scheduler to trigger polling automatically.<br>
     Manual poll: <a href="/api/poll" target="_blank">Trigger Now</a>
   </div>
-
+  
   <div class="gcs-info">
     <strong>Google Cloud Storage: ''' + ("Enabled" if USE_GCS else "Disabled") + '''</strong><br>
     ''' + (f"Bucket: {GCS_BUCKET_NAME}, CSV: {GCS_CSV_PATH}" if USE_GCS else "GCS is not enabled. Set USE_GCS=true to enable cloud storage.") + '''
@@ -376,7 +475,12 @@ function populateRouteCheckboxes() {
   const container = document.getElementById('routeCheckboxes');
   container.innerHTML = '';
   
-  Object.keys(allRoutesData).sort().forEach(route => {
+    // Sort routes numerically (route_1, route_2, route_3, etc.)
+    Object.keys(allRoutesData).sort((a, b) => {
+        const numA = parseInt(a.split('_')[1]);
+        const numB = parseInt(b.split('_')[1]);
+        return numA - numB;
+    }).forEach(route => {
     const color = routeColors[route] || '#cccccc';
     const isChecked = combinedChart ? !combinedChart.getDatasetMeta(
       combinedChart.data.datasets.findIndex(ds => ds.label === route)
@@ -460,12 +564,12 @@ async function buildChart(){
   const datasets = labels.map((label, i) => {
     const raw = (allRoutesData[label] || []).filter(p => p && p[1] != null);
     
+    // Use the FULL ISO timestamp, not just time
     const points = raw.map(p => {
-      const dt = luxon.DateTime.fromISO(p[0]);
       return {
-        x: dt.toFormat('HH:mm:ss'),
+        x: p[0],  // Use the full ISO timestamp string (e.g., "2026-03-09T08:30:00Z")
         y: p[1],
-        fullTime: dt.toLocaleString(luxon.DateTime.DATETIME_MED)
+        fullTime: luxon.DateTime.fromISO(p[0]).toLocaleString(luxon.DateTime.DATETIME_MED)
       };
     });
 
@@ -516,16 +620,26 @@ async function buildChart(){
       },
       scales: {
         x: {
-          type: 'category',
-          title: { display: true, text: 'Time' },
+          type: 'time',  // Changed from 'category' to 'time'
+          time: {
+            displayFormats: {
+              hour: 'HH:mm',        // Show hour:minute
+              minute: 'HH:mm',       // Show hour:minute
+              day: 'MMM d, HH:mm'    // Show date and time for day scale
+            },
+            tooltipFormat: 'MMM d, yyyy, HH:mm:ss'  // Full datetime in tooltip
+          },
+          title: { display: true, text: 'Time (UTC)' },
           ticks: {
+            source: 'auto',
+            maxRotation: 45,
             autoSkip: true,
             maxTicksLimit: 12
           }
         },
         y: {
           min: 0.5,
-          max: 3,
+          max: 4,
           title: { display: true, text: 'Congestion Index (duration / static)' }
         }
       }
@@ -544,7 +658,12 @@ async function refreshTable(){
     const tbody = document.querySelector('#live tbody');
     tbody.innerHTML = '';
     
-    const rows = Object.values(data).sort((a,b) => (a.label || '').localeCompare(b.label || ''));
+    // Sort table rows numerically
+    const rows = Object.values(data).sort((a, b) => {
+        const numA = parseInt((a.label || 'route_0').split('_')[1]);
+        const numB = parseInt((b.label || 'route_0').split('_')[1]);
+        return numA - numB;
+    });
     rows.forEach(row => {
       const tr = document.createElement('tr');
       tr.innerHTML = `<td>${row.label || ''}</td>
@@ -596,6 +715,11 @@ def api_all_history():
     out = {}
     for label, series in history_cache.items():
         out[label] = series[-limit:]
+
+    # Add debug info
+    print(f"API all_history called - returning {sum(len(v) for v in out.values())} total points")
+    print(f"Labels in response: {list(out.keys())}")
+
     return jsonify(out)
 
 @app.route("/export.csv")
