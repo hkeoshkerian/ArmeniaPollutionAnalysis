@@ -253,3 +253,218 @@ htmlwidgets::saveWidget(heatmap_leaflet,
 
 cat("Interactive heatmap saved\n")
 heatmap_leaflet
+# ====================================================================
+# GEMM Visualization Suite
+# ====================================================================
+
+library(ggplot2)
+library(terra)
+
+# Helper: convert SpatRaster to data frame for ggplot
+rast_to_df <- function(r, value_name = "value") {
+  df <- as.data.frame(r, xy = TRUE)
+  colnames(df)[3] <- value_name
+  df
+}
+
+# ====================================================================
+# PLOT 1 – Annual Average PM2.5 Map
+# ====================================================================
+df1 <- rast_to_df(pm25_annual_avg, "PM25")
+
+p1 <- ggplot(df1, aes(x = x, y = y, fill = PM25)) +
+  geom_raster() +
+  scale_fill_distiller(palette = "YlOrRd", direction = 1,
+                       na.value = "gray90", name = "PM₂.₅ (µg/m³)") +
+  coord_equal() +
+  labs(title = "Annual Average PM₂.₅ – Yerevan",
+       x = "Longitude", y = "Latitude") +
+  theme_minimal()
+
+# ====================================================================
+# PLOT 2 – Deaths per 1,000 Capita Map
+# ====================================================================
+df2 <- rast_to_df(deaths_per_capita_wgs84, "DeathsPer1k")
+
+p2 <- ggplot(df2, aes(x = x, y = y, fill = DeathsPer1k)) +
+  geom_raster() +
+  scale_fill_viridis_c(na.value = "gray90", name = "Deaths / 1k") +
+  coord_equal() +
+  labs(title = "PM₂.₅ Excess Deaths per 1,000 – Yerevan",
+       x = "Longitude", y = "Latitude") +
+  theme_minimal()
+
+# ====================================================================
+# PLOT 3 – Total Excess Deaths Map
+# ====================================================================
+df3 <- rast_to_df(deaths_raster, "Deaths")
+
+p3 <- ggplot(df3, aes(x = x, y = y, fill = Deaths)) +
+  geom_raster() +
+  scale_fill_distiller(palette = "Reds", direction = 1,
+                       na.value = "gray90", name = "Deaths") +
+  coord_equal() +
+  labs(title = "Total Excess Deaths per Grid Cell – Yerevan",
+       x = "Longitude", y = "Latitude") +
+  theme_minimal()
+
+# ====================================================================
+# PLOT 4 – Uncertainty (SE) Map
+# ====================================================================
+se_raster <- deaths_raster
+values(se_raster) <- sqrt(var_by_pop_cell)
+df4 <- rast_to_df(se_raster, "SE")
+
+p4 <- ggplot(df4, aes(x = x, y = y, fill = SE)) +
+  geom_raster() +
+  scale_fill_distiller(palette = "Blues", direction = 1,
+                       na.value = "gray90", name = "SE (deaths)") +
+  coord_equal() +
+  labs(title = "Mortality Estimate Uncertainty (SE) – Yerevan",
+       x = "Longitude", y = "Latitude") +
+  theme_minimal()
+
+# ====================================================================
+# PLOT 5 – Age-Group Deaths Bar Chart
+# NOTE: Add these two inserts into your existing loop first (see below)
+# ====================================================================
+
+# --- INSERT BEFORE your for(ag in names(pop_raster)) loop ---
+age_deaths_summary <- data.frame(AgeGroup = character(),
+                                 CoefAge  = character(),
+                                 Deaths   = numeric(),
+                                 stringsAsFactors = FALSE)
+
+# --- INSERT AT THE END INSIDE the if(!is.na(coef_matrix[...])) block ---
+age_deaths_summary <- rbind(age_deaths_summary, data.frame(
+  AgeGroup = ag,
+  CoefAge  = coef_age,
+  Deaths   = sum(death_values, na.rm = TRUE)
+))
+
+# --- After the loop ---
+age_deaths_agg <- aggregate(Deaths ~ CoefAge, data = age_deaths_summary, FUN = sum)
+age_deaths_agg$CoefAge <- factor(age_deaths_agg$CoefAge,
+                                 levels = c("0-25","25-30","30-35","35-40","40-45",
+                                            "45-50","50-55","55-60","60-65","65-70",
+                                            "70-75","75-80","80+"))
+
+p5 <- ggplot(age_deaths_agg, aes(x = CoefAge, y = Deaths)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "PM₂.₅ Excess Deaths by Age Group",
+       x = "Age Group", y = "Excess Deaths (annual)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# ====================================================================
+# PLOT 6 – GEMM Dose-Response Curves (RR and PAF vs. PM2.5)
+# ====================================================================
+pm25_seq      <- seq(0, 100, length.out = 500)
+cf            <- 2.4
+selected_ages <- c("0-25", "45-50", "65-70", "80+")
+
+curve_df <- do.call(rbind, lapply(selected_ages, function(ag) {
+  idx   <- which(coef_ages == ag)
+  theta <- coef_matrix[1, idx, 1]
+  alpha <- coef_matrix[1, idx, 3]
+  mu    <- coef_matrix[1, idx, 4]
+  nu    <- coef_matrix[1, idx, 5]
+  rr    <- calculate_gemm_rr(pm25_seq, theta, alpha, mu, nu, cf)
+  data.frame(PM25 = pm25_seq, RR = rr, PAF = (rr - 1) / rr, AgeGroup = ag)
+}))
+
+p6a <- ggplot(curve_df, aes(x = PM25, y = RR, color = AgeGroup)) +
+  geom_line(linewidth = 1) +
+  geom_vline(xintercept = cf, linetype = "dashed", color = "gray50") +
+  labs(title = "GEMM Relative Risk vs. PM₂.₅",
+       x = "PM₂.₅ (µg/m³)", y = "Relative Risk (RR)",
+       color = "Age Group") +
+  theme_minimal()
+
+p6b <- ggplot(curve_df, aes(x = PM25, y = PAF, color = AgeGroup)) +
+  geom_line(linewidth = 1) +
+  geom_vline(xintercept = cf, linetype = "dashed", color = "gray50") +
+  labs(title = "Population Attributable Fraction vs. PM₂.₅",
+       x = "PM₂.₅ (µg/m³)", y = "PAF",
+       color = "Age Group") +
+  theme_minimal()
+
+# ====================================================================
+# PLOT 7 – Grid-Cell PM2.5 vs. Excess Deaths Scatterplot
+# ====================================================================
+scatter_df <- data.frame(
+  PM25   = as.vector(values(pm25_pop_grid)),
+  Deaths = deaths_by_pop_cell
+)
+scatter_df <- scatter_df[!is.na(scatter_df$PM25) & scatter_df$Deaths > 0, ]
+
+p7 <- ggplot(scatter_df, aes(x = PM25, y = Deaths)) +
+  geom_point(alpha = 0.4, size = 1.2, color = "tomato") +
+  geom_smooth(method = "loess", se = TRUE, color = "black") +
+  labs(title = "Grid-Cell PM₂.₅ vs. Excess Deaths",
+       x = "Annual Avg PM₂.₅ (µg/m³)", y = "Excess Deaths") +
+  theme_minimal()
+
+# ====================================================================
+# PLOT 8 – Baseline vs. PM2.5-Attributable Deaths (Pie Chart)
+# ====================================================================
+baseline_deaths <- sum(values(pop_total), na.rm = TRUE) * baseline_rate
+attr_deaths     <- sum(deaths_by_pop_cell, na.rm = TRUE)
+
+summary_df <- data.frame(
+  Category = c("Baseline (non-PM₂.₅)", "PM₂.₅ Attributable"),
+  Deaths   = c(baseline_deaths - attr_deaths, attr_deaths)
+)
+
+p8 <- ggplot(summary_df, aes(x = "", y = Deaths, fill = Category)) +
+  geom_col(width = 1) +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values = c("steelblue", "tomato")) +
+  labs(title = "Share of Annual Deaths Attributable to PM₂.₅",
+       fill = NULL) +
+  theme_void()
+
+# ====================================================================
+# PLOT 9 – Total Deaths with 95% CI
+# ====================================================================
+ci_df <- data.frame(
+  Estimate = total_deaths,
+  Lower    = ci_lower,
+  Upper    = ci_upper,
+  Label    = "All-cause NCD+LRI"
+)
+
+p9 <- ggplot(ci_df, aes(x = Label, y = Estimate)) +
+  geom_col(fill = "steelblue", width = 0.4) +
+  geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.1, linewidth = 1) +
+  labs(title = "Annual PM₂.₅ Excess Deaths – Yerevan (95% CI)",
+       x = NULL, y = "Excess Deaths") +
+  theme_minimal()
+
+# ====================================================================
+# Print all plots
+# ====================================================================
+print(p1)
+print(p2)
+print(p3)
+print(p4)
+print(p5)
+print(p6a)
+print(p6b)
+print(p7)
+print(p8)
+print(p9)
+
+# ====================================================================
+# Optional: Save all to files
+# ====================================================================
+ggsave("plot1_pm25_map.png",           p1,   width = 8, height = 6, dpi = 300)
+ggsave("plot2_deaths_per_capita.png",  p2,   width = 8, height = 6, dpi = 300)
+ggsave("plot3_deaths_total.png",       p3,   width = 8, height = 6, dpi = 300)
+ggsave("plot4_uncertainty.png",        p4,   width = 8, height = 6, dpi = 300)
+ggsave("plot5_age_bar.png",            p5,   width = 8, height = 5, dpi = 300)
+ggsave("plot6a_rr_curve.png",          p6a,  width = 8, height = 5, dpi = 300)
+ggsave("plot6b_paf_curve.png",         p6b,  width = 8, height = 5, dpi = 300)
+ggsave("plot7_scatter.png",            p7,   width = 7, height = 5, dpi = 300)
+ggsave("plot8_pie.png",                p8,   width = 6, height = 6, dpi = 300)
+ggsave("plot9_ci_bar.png",             p9,   width = 5, height = 5, dpi = 300)
