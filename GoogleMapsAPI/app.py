@@ -11,7 +11,7 @@ from google.cloud import storage
 # Config
 # ----------------------------
 CSV_PATH = os.getenv("CSV_PATH", "traffic_observations.csv")
-CORRIDORS_JSON = os.getenv("CORRIDORS_JSON", "routes_network.json")
+CORRIDORS_JSON = os.getenv("CORRIDORS_JSON", "routes_network_bidrectional.json")
 PLOT_WINDOW_LIMIT = int(os.getenv("PLOT_WINDOW_LIMIT", "150"))
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8080"))
@@ -19,7 +19,7 @@ PORT = int(os.getenv("PORT", "8080"))
 # GCS Configuration
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "yerevan-traffic-data")
 GCS_CSV_PATH = os.getenv("GCS_CSV_PATH", "traffic_observations.csv")
-GCS_CORRIDORS_PATH = os.getenv("GCS_CORRIDORS_PATH", "routes_network.json")
+GCS_CORRIDORS_PATH = os.getenv("GCS_CORRIDORS_PATH", "routes_network_bidrectional.json")
 USE_GCS = os.getenv("USE_GCS", "false").lower() == "true"
 
 ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
