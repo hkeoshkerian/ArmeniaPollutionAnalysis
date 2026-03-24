@@ -5,6 +5,7 @@ library(data.table)
 library(osmextract)
 library(dplyr)
 library(progressr)
+library(elevatr)      # NEW: for elevation lookup
 
 handlers(global = TRUE)
 handlers("progress")
@@ -16,7 +17,10 @@ yerevan_shp <- sf::st_read("C:/Users/mrealehatem/Documents/GitHub/ArmeniaPolluti
                            layer = "boundary-polygon-lvl4")
 pop_path       <- "C:/Users/mrealehatem/Documents/GitHub/ArmeniaPollutionAnalysis/WorldPopData/arm_age_data/pop.tif"
 landcover_path <- "C:/Users/mrealehatem/Downloads/worldcover.tif"
-chm_paths      <- paste0("C:/Users/mrealehatem/Downloads/veg", 17:25, ".tif")
+
+# CHANGED: only 2023–2025 (years 23, 24, 25)
+chm_paths      <- paste0("C:/Users/mrealehatem/Downloads/veg", 23:25, ".tif")
+
 roads_pbf      <- "C:/Users/mrealehatem/Downloads/armenia.pbf"
 
 BUFFER_RADII <- c(100, 200, 500)
@@ -67,7 +71,7 @@ cat("✓ Buffers pre-computed\n")
 # -----------------------------------------------------------------------
 # 2. Population — reproject buffers to raster CRS, never touch the raster
 # -----------------------------------------------------------------------
-cat("\n[2/5] Population...\n")
+cat("\n[2/6] Population...\n")
 pop_rast <- terra::rast(pop_path)
 
 with_progress({
@@ -82,51 +86,59 @@ with_progress({
 cat("✓ Population extracted\n")
 
 # -----------------------------------------------------------------------
-# 3. Vegetation height and volume — terra + reproject buffers, not raster
+# 3. Vegetation height and volume — 2023–2025 only
 # -----------------------------------------------------------------------
-cat("\n[3/5] Vegetation...\n")
+cat("\n[3/6] Vegetation (2023–2025)...\n")
 existing_chm <- chm_paths[file.exists(chm_paths)]
 cat(" Found", length(existing_chm), "CHM files\n")
 
-with_progress({
-  p <- progressor(steps = length(existing_chm) * length(BUFFER_RADII))
+if (length(existing_chm) == 0) {
+  warning("No CHM files found for years 23–25. Check that veg23.tif, veg24.tif, veg25.tif exist.")
+} else {
+  # CHANGED: print which years are actually being read
+  year_labels <- regmatches(
+    existing_chm,
+    regexpr("(?<=veg)\\d{2}", existing_chm, perl = TRUE)
+  )
+  cat(" Reading vegetation for years:", paste(paste0("20", year_labels), collapse = ", "), "\n")
   
-  for (chm_path in existing_chm) {
-    year_suffix <- regmatches(
-      chm_path,
-      regexpr("(?<=veg)\\d{2}", chm_path, perl = TRUE)
-    )
+  with_progress({
+    p <- progressor(steps = length(existing_chm) * length(BUFFER_RADII))
     
-    chm_rast <- terra::rast(chm_path)  # lazy load — no reprojection of raster
-    
-    for (r in BUFFER_RADII) {
-      # Reproject buffers to match raster CRS — fast, small object
-      bufs_native <- st_transform(bufs_list[[paste0("r", r)]], terra::crs(chm_rast))
+    for (chm_path in existing_chm) {
+      year_suffix <- regmatches(
+        chm_path,
+        regexpr("(?<=veg)\\d{2}", chm_path, perl = TRUE)
+      )
       
-      veg_vals <- exact_extract(chm_rast, bufs_native, "mean", progress = FALSE)
+      cat(sprintf("  Loading veg%s.tif (year 20%s)...\n", year_suffix, year_suffix))
+      chm_rast <- terra::rast(chm_path)
       
-      grid_100m[[paste0("veg", year_suffix, "_height_", r, "m")]] <- veg_vals
-      grid_100m[[paste0("veg", year_suffix, "_volume_", r, "m")]] <- veg_vals * (pi * r^2)
-      p(message = sprintf("veg%s %dm done", year_suffix, r))
+      for (r in BUFFER_RADII) {
+        bufs_native <- st_transform(bufs_list[[paste0("r", r)]], terra::crs(chm_rast))
+        
+        veg_vals <- exact_extract(chm_rast, bufs_native, "mean", progress = FALSE)
+        
+        grid_100m[[paste0("veg", year_suffix, "_height_", r, "m")]] <- veg_vals
+        grid_100m[[paste0("veg", year_suffix, "_volume_", r, "m")]] <- veg_vals * (pi * r^2)
+        p(message = sprintf("veg%s %dm done", year_suffix, r))
+      }
     }
-  }
-})
-cat("✓ Vegetation extracted\n")
+  })
+  cat("✓ Vegetation extracted\n")
+}
 
 # -----------------------------------------------------------------------
-# 4. Landcover — fast built-in "frac" (single C++ pass per radius)
+# 4. Landcover — fast built-in "frac" + print land use categories found
 # -----------------------------------------------------------------------
-cat("\n[4/5] Landcover...\n")
+cat("\n[4/6] Landcover...\n")
 if (file.exists(landcover_path)) {
   lc_rast <- terra::rast(landcover_path)
-  # Reproject raster once here only — justified because "frac" needs consistent
-  # pixel alignment, and we do it once not per-loop
   lc_rast <- terra::project(lc_rast, "epsg:32638", method = "near")
   
   for (r in BUFFER_RADII) {
     cat(sprintf("  %dm buffer (progress below):\n", r))
     
-    # Native C++ progress bar via progress = TRUE
     lc_frac <- exact_extract(
       lc_rast,
       bufs_list[[paste0("r", r)]],
@@ -134,7 +146,14 @@ if (file.exists(landcover_path)) {
       progress = TRUE
     )
     
-    # Rename frac_<val> → lc<val>_pct_<r>m, scale 0–1 → 0–100
+    # CHANGED: print detected land use categories (once, on first radius pass)
+    if (r == BUFFER_RADII[1]) {
+      raw_classes <- gsub("^frac_", "", names(lc_frac))
+      cat(sprintf("  Land use categories detected (%d total): %s\n",
+                  length(raw_classes),
+                  paste(raw_classes, collapse = ", ")))
+    }
+    
     names(lc_frac) <- gsub("^frac_(.+)$", paste0("lc\\1_pct_", r, "m"), names(lc_frac))
     lc_frac        <- lc_frac * 100
     
@@ -145,35 +164,50 @@ if (file.exists(landcover_path)) {
 }
 
 # -----------------------------------------------------------------------
-# 5. Road length within buffers + distance to nearest primary road
+# 5. Elevation — elevatr::get_elev_point at centroid coords           NEW
 # -----------------------------------------------------------------------
-cat("\n[5/5] Roads...\n")
+cat("\n[5/6] Elevation...\n")
 
-# 5a. Road length per buffer radius
+# elevatr needs WGS84 (EPSG:4326)
+cents_wgs84 <- st_transform(cents, 4326)
+
+# get_elev_point queries the AWS Terrain Tiles at zoom=14 (~10 m resolution)
+# src="aws" is free, no API key required
+elev_df <- elevatr::get_elev_point(
+  locations = cents_wgs84,
+  src       = "aws",
+  z         = 14          # zoom level: higher = finer resolution, slower
+)
+
+grid_100m$elevation_m <- elev_df$elevation
+cat(sprintf("✓ Elevation extracted (min: %.1f m, max: %.1f m, mean: %.1f m)\n",
+            min(elev_df$elevation, na.rm = TRUE),
+            max(elev_df$elevation, na.rm = TRUE),
+            mean(elev_df$elevation, na.rm = TRUE)))
+
+# -----------------------------------------------------------------------
+# 6. Road length within buffers + distance to nearest primary road
+# -----------------------------------------------------------------------
+cat("\n[6/6] Roads...\n")
+
 with_progress({
   p <- progressor(steps = length(BUFFER_RADII))
   
   for (r in BUFFER_RADII) {
     bufs <- bufs_list[[paste0("r", r)]]
     
-    # Use full sf object (not st_geometry) so attributes survive intersection
     road_clip <- st_intersection(yerevan_roads, bufs["buf_id"])
-    
-    # Keep only line geometries
     road_clip <- road_clip[
       st_geometry_type(road_clip) %in% c("LINESTRING", "MULTILINESTRING"), 
     ]
     
-    # Build clean data.table directly
     len_df <- data.table(
       buf_id  = as.integer(road_clip$buf_id),
       seg_len = as.numeric(st_length(road_clip))
     )
     
-    # Sum lengths per buffer cell
     len_by_buf <- len_df[, .(seg_len = sum(seg_len, na.rm = TRUE)), by = buf_id]
     
-    # Left-join to full grid, fill missing with 0
     result <- merge(
       data.table(buf_id = seq_len(n_cells)),
       len_by_buf,
@@ -189,18 +223,14 @@ with_progress({
 
 cat("✓ Road lengths computed\n")
 
-
-# 5b. Distance to nearest primary road
 primary_roads <- filter(yerevan_roads, highway == "primary")
 
 if (nrow(primary_roads) > 0) {
   cat("  Computing distance to nearest primary road...\n")
   
-  nearest_idx <- st_nearest_feature(cents, primary_roads)
-  
-  # Single vectorised call — extract diagonal of matched pairs
-  near_geom     <- primary_roads[nearest_idx, ]
-  dist_primary  <- as.numeric(diag(st_distance(cents, near_geom)))
+  nearest_idx  <- st_nearest_feature(cents, primary_roads)
+  near_geom    <- primary_roads[nearest_idx, ]
+  dist_primary <- as.numeric(diag(st_distance(cents, near_geom)))
   
   grid_100m$dist_primary_road_m <- dist_primary
   cat("✓ Distance to primary road computed\n")
@@ -210,7 +240,7 @@ if (nrow(primary_roads) > 0) {
 }
 
 # -----------------------------------------------------------------------
-# 6. Export
+# 7. Export
 # -----------------------------------------------------------------------
 cat("\nExporting...\n")
 output_df <- st_drop_geometry(grid_100m) |> as.data.table()
